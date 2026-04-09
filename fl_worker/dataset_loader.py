@@ -1,17 +1,18 @@
 import os
 import torch
 import torchaudio
+import soundfile as sf
 import torch.nn.functional as F
+import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 
 class AudioPneumoniaDataset(Dataset):
-    def __init__(self, client_id, base_dir=r"C:\PBL7_Data", max_length=15, target_sr=16000, n_mels=64, is_train=True):
-        self.audio_dir = os.path.join(base_dir, f"Client_{client_id}", "audio_files")
-        self.files = [f for f in os.listdir(self.audio_dir) if f.endswith('.wav')]
-        
-        if len(self.files) < 2:
-            raise ValueError(f"Client {client_id} không đủ dữ liệu (ít nhất 2 file).")
-
+    def __init__(self, csv_file, audio_dir, max_length=15, target_sr=16000, n_mels=64, is_train=True):
+        if not os.path.exists(csv_file):
+            raise FileNotFoundError(f"File Metadata missing: {csv_file}")
+            
+        self.data = pd.read_csv(csv_file)
+        self.audio_dir = audio_dir
         self.max_length = max_length
         self.target_sr = target_sr
         self.is_train = is_train
@@ -24,16 +25,25 @@ class AudioPneumoniaDataset(Dataset):
         self.time_mask = torchaudio.transforms.TimeMasking(time_mask_param=20)
 
     def __len__(self):
-        return len(self.files)
+        return len(self.data)
 
     def __getitem__(self, idx):
-        file_name = self.files[idx]
-        file_path = os.path.join(self.audio_dir, file_name)
-        
-        # Bắt nhãn từ tên file sinh ra ở Giai đoạn 1
-        label = 1.0 if file_name.startswith("Abnormal") else 0.0
+        wav_path = self.data.iloc[idx]["path"]
+        label = int(self.data.iloc[idx]["label"])
 
-        waveform, sr = torchaudio.load(file_path)
+        filename = os.path.basename(wav_path.replace('\\', '/'))
+        real_path = os.path.join(self.audio_dir, filename)
+
+        if not os.path.exists(real_path):
+             raise FileNotFoundError(f"Audio file missing: {real_path}")
+
+        waveform_np, sr = sf.read(real_path)
+        waveform = torch.from_numpy(waveform_np).float()
+        
+        if waveform.ndim == 1:
+            waveform = waveform.unsqueeze(0)
+        elif waveform.ndim == 2:
+            waveform = waveform.transpose(0, 1)
 
         if waveform.shape[0] > 1:
             waveform = torch.mean(waveform, dim=0, keepdim=True)
@@ -64,17 +74,16 @@ class AudioPneumoniaDataset(Dataset):
 
         return mel_spec_db, torch.tensor(label, dtype=torch.float32)
 
-def load_client_data(client_id, batch_size=16):
-    # Dùng chung class, chia train/val
-    full_dataset = AudioPneumoniaDataset(client_id, is_train=True)
-    train_size = int(0.8 * len(full_dataset))
-    val_size = len(full_dataset) - train_size
+def load_client_data(client_id, batch_size=16, base_dir=r"C:\Users\phant\Downloads\PBL7"):
+    audio_dir = os.path.join(base_dir, "fl_lung_data_audio", "lung_data_audio_processed")
     
-    train_set, val_set = torch.utils.data.random_split(full_dataset, [train_size, val_size])
-    
-    # Ép val_set không dùng Augmentation (Masking)
-    val_set.dataset.is_train = False 
+    train_csv = os.path.join(base_dir, "metadata", "audio_fl", f"client_{client_id}_train.csv")
+    val_csv = os.path.join(base_dir, "metadata", "audio_fl", f"client_{client_id}_val.csv")
+
+    train_set = AudioPneumoniaDataset(train_csv, audio_dir, is_train=True)
+    val_set = AudioPneumoniaDataset(val_csv, audio_dir, is_train=False)
     
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_set, batch_size=batch_size)
+    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
+    
     return train_loader, val_loader

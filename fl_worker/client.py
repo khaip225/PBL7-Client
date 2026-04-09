@@ -8,6 +8,7 @@ from dataset_loader import load_client_data
 import copy
 import sys
 import os
+from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from ai_engines.audio_engine.cnn14_model import CNN14, freeze_model_blocks
 
@@ -34,7 +35,6 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
         self.set_parameters(parameters)
         self.model.train()
 
-        # Giữ một bản sao Tạ Global (đã đóng băng) để tính FedProx Loss
         global_model = copy.deepcopy(self.model)
         global_model.eval()
         for param in global_model.parameters():
@@ -47,7 +47,10 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
 
         for epoch in range(local_epochs):
-            for inputs, labels in self.trainloader:
+            print(f"\n--- Epoch {epoch+1}/{local_epochs} ---")
+            progress_bar = tqdm(self.trainloader, desc="Training")
+            
+            for inputs, labels in progress_bar:
                 inputs = inputs.to(self.device)
                 labels = labels.float().unsqueeze(1).to(self.device)
 
@@ -55,7 +58,6 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, labels)
 
-                # Tính Proximal Term (Thuật toán FedProx)
                 if self.mu > 0:
                     proximal_term = 0.0
                     for param, global_param in zip(self.model.parameters(), global_model.parameters()):
@@ -67,6 +69,8 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 optimizer.step()
                 scheduler.step()
+                
+                progress_bar.set_postfix({'loss': f"{loss.item():.4f}"})
 
         return self.get_parameters(config={}), len(self.trainloader.dataset), {}
 
@@ -111,5 +115,6 @@ if __name__ == "__main__":
 
     fl.client.start_client(
         server_address=args.server_address,
-        client=AdvancedPneumoniaClient(args.client_id, model, trainloader, valloader, device).to_client()
+        client=AdvancedPneumoniaClient(args.client_id, model, trainloader, valloader, device).to_client(),
+        grpc_max_message_length=1024 * 1024 * 1024
     )
