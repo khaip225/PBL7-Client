@@ -3,7 +3,7 @@ import shutil
 from datetime import datetime
 
 class StorageManager:
-    def __init__(self, base_dir="C:\\Users\\phant\\Documents\\Study\\PBL7\\Local_Data", client_id=1):
+    def __init__(self, base_dir="./Local_Data", client_id=1):
         self.client_dir = os.path.join(base_dir, f"Client_{client_id}")
         self.audio_dir = os.path.join(self.client_dir, "audio_files")
         self.image_dir = os.path.join(self.client_dir, "image_files")

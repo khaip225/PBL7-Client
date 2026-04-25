@@ -4,13 +4,14 @@ import torch.nn as nn
 import torch.optim as optim
 import argparse
 from collections import OrderedDict
-from dataset_loader import load_client_data
+from dataset_loader import load_client_data, load_client_data_image
 import copy
 import sys
 import os
 from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from ai_engines.audio_engine.cnn14_model import CNN14, freeze_model_blocks
+from ai_engines.image_engine.resnet18_model import ResNet18, freeze_model_blocks as freeze_image_blocks
 
 class AdvancedPneumoniaClient(fl.client.NumPyClient):
     def __init__(self, client_id, model, trainloader, valloader, device, lr=1e-4, mu=0.001):
@@ -101,17 +102,26 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--client_id", type=int, required=True)
-    parser.add_argument("--server_address", type=str, default="127.0.0.1:8080")
+    parser.add_argument("--server_address", type=str, default=None)
+    parser.add_argument("--modality", type=str, choices=["audio", "image"], default="audio")
     args = parser.parse_args()
 
+    # Đặt đúng port dựa trên modality (Audio=8080, Image=8081)
+    if args.server_address is None:
+        port = 8080 if args.modality == "audio" else 8081
+        args.server_address = f"127.0.0.1:{port}"
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Khởi động Client {args.client_id} trên {device}...")
-    
-    # Load Model (có freeze)
-    model = CNN14()
-    model = freeze_model_blocks(model).to(device)
-    
-    trainloader, valloader = load_client_data(args.client_id)
+    print(f"Khởi động Client {args.client_id} ({args.modality.upper()}) trên {device}...")
+
+    if args.modality == "audio":
+        model = CNN14()
+        model = freeze_model_blocks(model).to(device)
+        trainloader, valloader = load_client_data(args.client_id)
+    else:
+        model = ResNet18(in_channels=3)
+        model = freeze_image_blocks(model).to(device)
+        trainloader, valloader = load_client_data_image(args.client_id)
 
     fl.client.start_client(
         server_address=args.server_address,

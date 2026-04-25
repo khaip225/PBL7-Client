@@ -4,6 +4,8 @@ import torchaudio
 import soundfile as sf
 import torch.nn.functional as F
 import pandas as pd
+from PIL import Image
+from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
 
 class AudioPneumoniaDataset(Dataset):
@@ -74,8 +76,8 @@ class AudioPneumoniaDataset(Dataset):
 
         return mel_spec_db, torch.tensor(label, dtype=torch.float32)
 
-def load_client_data(client_id, batch_size=16, base_dir=r"C:\Users\phant\Downloads\PBL7"):
-    audio_dir = os.path.join(base_dir, "fl_lung_data_audio", "lung_data_audio_processed")
+def load_client_data(client_id, batch_size=16, base_dir="./fl_data"):
+    audio_dir = os.path.join(base_dir, "fl_audio")
     
     train_csv = os.path.join(base_dir, "metadata", "audio_fl", f"client_{client_id}_train.csv")
     val_csv = os.path.join(base_dir, "metadata", "audio_fl", f"client_{client_id}_val.csv")
@@ -86,4 +88,77 @@ def load_client_data(client_id, batch_size=16, base_dir=r"C:\Users\phant\Downloa
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
     
+    return train_loader, val_loader
+
+
+class ImagePneumoniaDataset(Dataset):
+    def __init__(self, data_dir, is_train=True):
+        self.data_dir = data_dir
+        self.is_train = is_train
+        
+        # Tự động quét file trong 2 thư mục NORMAL và PNEUMONIA
+        self.data = []
+        normal_dir = os.path.join(data_dir, "NORMAL")
+        pneumonia_dir = os.path.join(data_dir, "PNEUMONIA")
+        
+        if os.path.exists(normal_dir):
+            for f in os.listdir(normal_dir):
+                if f.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    self.data.append((os.path.join(normal_dir, f), 0))
+                    
+        if os.path.exists(pneumonia_dir):
+            for f in os.listdir(pneumonia_dir):
+                if f.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    self.data.append((os.path.join(pneumonia_dir, f), 1))
+                    
+        if len(self.data) == 0:
+            print(f"[Cảnh báo] Không tìm thấy ảnh nào trong {normal_dir} hoặc {pneumonia_dir}")
+
+        if self.is_train:
+            self.transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.RandomRotation(10),
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ])
+        else:
+            self.transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ])
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        img_path, label = self.data[idx]
+
+        image = Image.open(img_path).convert("RGB")
+        image = self.transform(image)
+
+        return image, torch.tensor(label, dtype=torch.float32)
+
+def load_client_data_image(client_id, batch_size=16, base_dir="./fl_data"):
+    # Cấu trúc thư mục mới: fl_data/fl_image/client_1/train/NORMAL ...
+    client_dir = os.path.join(base_dir, "fl_image", f"client_{client_id}")
+    
+    # Nếu chưa chia thư mục client riêng, lấy xài chung thư mục tổng để demo
+    if not os.path.exists(client_dir):
+        client_dir = os.path.join(base_dir, "fl_image")
+        
+    train_dir = os.path.join(client_dir, "train")
+    val_dir = os.path.join(client_dir, "test") # Hoặc val
+    if not os.path.exists(val_dir): val_dir = os.path.join(client_dir, "val")
+    
+    # Nếu không có file train/test bên trong, quét thẳng thư mục hiện tại
+    if not os.path.exists(train_dir): train_dir = client_dir
+    if not os.path.exists(val_dir): val_dir = client_dir
+
+    train_set = ImagePneumoniaDataset(train_dir, is_train=True)
+    val_set = ImagePneumoniaDataset(val_dir, is_train=False)
+
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_set, batch_size=batch_size, shuffle=False)
+
     return train_loader, val_loader

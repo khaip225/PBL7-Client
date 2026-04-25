@@ -1,2 +1,6 @@
 client-env
 best_global_audio.pth
+best_global_image.pth
+*.pth
+*.png
+*pyc
