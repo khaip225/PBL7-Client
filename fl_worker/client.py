@@ -85,11 +85,29 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
                 progress_bar.set_postfix({'loss': f"{loss.item():.4f}"})
 
         avg_train_loss = total_train_loss / total_train_samples if total_train_samples > 0 else 0.0
+
+        # Quick evaluation after training for accuracy metric
+        val_accuracy = None
+        if self.valloader and len(self.valloader.dataset) > 0:
+            self.model.eval()
+            total_correct, total_val = 0, 0
+            with torch.no_grad():
+                for inputs, labels in self.valloader:
+                    inputs = inputs.to(self.device)
+                    labels = labels.float().unsqueeze(1).to(self.device)
+                    outputs = self.model(inputs)
+                    probs = torch.sigmoid(outputs)
+                    preds = (probs >= 0.5).float()
+                    total_correct += (preds == labels).sum().item()
+                    total_val += labels.size(0)
+            val_accuracy = float(total_correct / total_val) if total_val > 0 else None
+
         api_client.update_training_state(
             current_round=self.current_round,
             loss=avg_train_loss,
+            accuracy=val_accuracy,
         )
-        return self.get_parameters(config={}), len(self.trainloader.dataset), {"loss": avg_train_loss}
+        return self.get_parameters(config={}), len(self.trainloader.dataset), {"loss": avg_train_loss, "accuracy": val_accuracy}
 
     def evaluate(self, parameters, config):
         self.set_parameters(parameters)
