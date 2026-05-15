@@ -1,22 +1,32 @@
 import customtkinter as ctk
+import os
 from tkinter import filedialog
 from ai_engines.audio_engine.predictor import AudioPredictor
 from ai_engines.image_engine.predictor import ImagePredictor
 from ai_engines.fusion import LateFusion
 from local_managers.storage_manager import StorageManager
+from config import config
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
+THRESHOLD = config.PREDICTION_THRESHOLD
+
+# Resolve model paths relative to this script, not CWD
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+AUDIO_MODEL = os.path.join(BASE_DIR, "ai_engines", "current_weights", "best_global_audio.pth")
+IMAGE_MODEL = os.path.join(BASE_DIR, "ai_engines", "current_weights", "best_global_image.pth")
+
+
 class DiagnosisApp(ctk.CTk):
     def __init__(self):
         super().__init__()
-        
-        self.title("PBL7 - Chẩn đoán viêm phổi đa phương thức")
+
+        self.title("PBL7 - Chuan doan viem phoi da phuong thuc")
         self.geometry("700x700")
-        
-        self.audio_predictor = AudioPredictor("ai_engines/current_weights/best_global_audio.pth")
-        self.image_predictor = ImagePredictor("ai_engines/current_weights/best_global_image.pth")
+
+        self.audio_predictor = AudioPredictor(AUDIO_MODEL, threshold=THRESHOLD)
+        self.image_predictor = ImagePredictor(IMAGE_MODEL)
         self.fusion_engine = LateFusion(audio_weight=0.6, image_weight=0.4)
         self.storage_manager = StorageManager(client_id=1)
         
@@ -104,7 +114,7 @@ class DiagnosisApp(ctk.CTk):
             
             final_score = self.fusion_engine.fuse(audio_score, image_score)
             
-            label = "Abnormal" if final_score > 0.5 else "Normal"
+            label = "Abnormal" if final_score > THRESHOLD else "Normal"
             # Calculate confidence for the predicted label
             if label == "Normal":
                 confidence = (1 - final_score) * 100
@@ -122,7 +132,7 @@ class DiagnosisApp(ctk.CTk):
             
             audio_score = self.audio_predictor.predict(self.audio_path)
             
-            label = "Abnormal" if audio_score > 0.5 else "Normal"
+            label = "Abnormal" if audio_score > THRESHOLD else "Normal"
             # Calculate confidence for the predicted label
             if label == "Normal":
                 confidence = (1 - audio_score) * 100
@@ -140,7 +150,7 @@ class DiagnosisApp(ctk.CTk):
             
             image_score = self.image_predictor.predict(self.image_path)
             
-            label = "Abnormal" if image_score > 0.5 else "Normal"
+            label = "Abnormal" if image_score > THRESHOLD else "Normal"
             # Calculate confidence for the predicted label
             if label == "Normal":
                 confidence = (1 - image_score) * 100

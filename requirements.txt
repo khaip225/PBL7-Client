@@ -1,0 +1,28 @@
+# PBL7 Client - Dependencies
+# Core FL
+flwr>=1.13.0
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# FastAPI integration
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# System monitoring
+psutil>=5.9.0
+
+# Dashboard (optional, install with: pip install -r requirements.txt streamlit)
+# streamlit>=1.28.0
+
+# Data processing
+soundfile>=0.12.0
+pandas>=2.0.0
+Pillow>=10.0.0
+tqdm>=4.65.0
+
+# GPU monitoring (optional)
+# pynvml>=11.5.0
+
+# Desktop UI
+customtkinter>=5.2.0

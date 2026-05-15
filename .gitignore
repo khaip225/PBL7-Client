@@ -3,4 +3,10 @@ best_global_audio.pth
 best_global_image.pth
 *.pth
 *.png
-*pyc
+*.pyc
+__pycache__/
+.env
+client_state.json
+*.log
+Local_Data/
+fl_worker/fl_data/

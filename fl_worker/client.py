@@ -158,7 +158,7 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Khoi dong Client {args.client_id} ({args.modality.upper()}) tren {device}...")
 
-    # ---- FastAPI registration ----
+    # ---- FastAPI registration (idempotent by client_name) ----
     client_uuid = api_client.register(task_type=args.modality)
     if client_uuid:
         print(f"Registered with FastAPI: {client_uuid}")
