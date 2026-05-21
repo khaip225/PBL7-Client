@@ -15,13 +15,16 @@ from ai_engines.audio_engine.predictor import AudioPredictor
 from ai_engines.image_engine.predictor import ImagePredictor
 from ai_engines.fusion import LateFusion
 from local_managers.storage_manager import StorageManager
+from local_managers.data_sync_manager import DataSyncManager
 from gui_backend.services.diagnosis_service import DiagnosisService
 from gui_backend.services.training_service import TrainingService
 from gui_backend.services.history_service import HistoryService
+from gui_backend.services.review_service import ReviewService
 from gui_backend.api.health import router as health_router
 from gui_backend.api.diagnosis import router as diagnosis_router
 from gui_backend.api.training import router as training_router
 from gui_backend.api.history import router as history_router
+from gui_backend.api.review import router as review_router
 
 AUDIO_MODEL = os.path.join(BASE_DIR, "ai_engines", "current_weights", "best_global_audio.pth")
 IMAGE_MODEL = os.path.join(BASE_DIR, "ai_engines", "current_weights", "best_global_image.pth")
@@ -38,13 +41,15 @@ async def lifespan(app: FastAPI):
     audio_predictor = AudioPredictor(AUDIO_MODEL, threshold=config.PREDICTION_THRESHOLD)
     image_predictor = ImagePredictor(IMAGE_MODEL)
     fusion_engine = LateFusion(audio_weight=0.6, image_weight=0.4)
-    storage_manager = StorageManager(client_id=1)
+    storage_manager = StorageManager(client_id=config.CLIENT_ID)
+    data_sync_manager = DataSyncManager(client_id=config.CLIENT_ID)
 
     app.state.diagnosis_service = DiagnosisService(
         audio_predictor, image_predictor, fusion_engine, storage_manager
     )
     app.state.training_service = TrainingService()
     app.state.history_service = HistoryService()
+    app.state.review_service = ReviewService(app.state.history_service, data_sync_manager)
 
     print("[GUI Backend] Ready.")
     yield
@@ -71,6 +76,7 @@ app.include_router(health_router)
 app.include_router(diagnosis_router)
 app.include_router(training_router)
 app.include_router(history_router)
+app.include_router(review_router)
 
 
 if __name__ == "__main__":

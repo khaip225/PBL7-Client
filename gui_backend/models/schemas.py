@@ -41,6 +41,7 @@ class DiagnosisResponse(BaseModel):
 class TrainingStartRequest(BaseModel):
     modality: str = "image"
     total_rounds: int = 10
+    total_epochs: int = 2
     server_address: str | None = None
 
 
@@ -49,6 +50,7 @@ class TrainingStartResponse(BaseModel):
     pid: int
     modality: str
     total_rounds: int
+    total_epochs: int
 
 
 class TrainingStopResponse(BaseModel):
@@ -80,8 +82,18 @@ class TrainingStateResponse(BaseModel):
     connected_to_flower: bool
     current_round: int
     total_rounds: int
+    current_epoch: int = 0
+    total_epochs: int = 0
     loss: float | None = None
     accuracy: float | None = None
+    train_loss: float | None = None
+    train_accuracy: float | None = None
+    val_loss: float | None = None
+    val_accuracy: float | None = None
+    precision: float | None = None
+    recall: float | None = None
+    f1: float | None = None
+    auc: float | None = None
     last_heartbeat: str | None = None
     latency_ms: int = 0
     training_active: bool
@@ -106,3 +118,26 @@ class HistoryListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ReviewListResponse(HistoryListResponse):
+    pass
+
+
+class ReviewApproveRequest(BaseModel):
+    label: str
+
+
+class ReviewApproveResponse(BaseModel):
+    record_id: str
+    label: str
+    audio_dest: str | None = None
+    image_dest: str | None = None
+    batch_dir: str
+    csv_path: str | None = None
+
+
+class ReviewStateResponse(BaseModel):
+    current_batch: int = 1
+    client_id: str = "1"
+    threshold: int = 0

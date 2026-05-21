@@ -54,10 +54,21 @@ export default function TrainingPage() {
           <TrainingProgress
             currentRound={state.current_round}
             totalRounds={state.total_rounds}
+            currentEpoch={state.current_epoch}
+            totalEpochs={state.total_epochs}
             status={state.status}
             trainingActive={state.training_active}
           />
-          <MetricsDisplay loss={state.loss} accuracy={state.accuracy} />
+          <MetricsDisplay
+            trainLoss={state.train_loss}
+            trainAccuracy={state.train_accuracy}
+            valLoss={state.val_loss}
+            valAccuracy={state.val_accuracy}
+            precision={state.precision}
+            recall={state.recall}
+            f1={state.f1}
+            auc={state.auc}
+          />
         </div>
         <div className="space-y-6">
           <SystemMetrics metrics={state.system} />

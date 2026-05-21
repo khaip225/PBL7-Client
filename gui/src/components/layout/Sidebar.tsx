@@ -1,9 +1,10 @@
-import { Stethoscope, Brain, Clock } from "lucide-react";
+import { Stethoscope, Brain, Clock, ClipboardCheck } from "lucide-react";
 import type { Tab } from "./AppShell";
 
 const items: { id: Tab; label: string; icon: typeof Stethoscope }[] = [
   { id: "diagnosis", label: "Chẩn đoán", icon: Stethoscope },
   { id: "training", label: "FL Training", icon: Brain },
+  { id: "review", label: "Duyệt dữ liệu", icon: ClipboardCheck },
   { id: "history", label: "Lịch sử", icon: Clock },
 ];
 

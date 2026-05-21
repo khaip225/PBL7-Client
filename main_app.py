@@ -28,7 +28,7 @@ class DiagnosisApp(ctk.CTk):
         self.audio_predictor = AudioPredictor(AUDIO_MODEL, threshold=THRESHOLD)
         self.image_predictor = ImagePredictor(IMAGE_MODEL)
         self.fusion_engine = LateFusion(audio_weight=0.6, image_weight=0.4)
-        self.storage_manager = StorageManager(client_id=1)
+        self.storage_manager = StorageManager(client_id=config.CLIENT_ID)
         
         self.audio_path = None
         self.image_path = None

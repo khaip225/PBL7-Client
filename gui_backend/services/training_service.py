@@ -16,12 +16,19 @@ class TrainingService:
         self._process: subprocess.Popen | None = None
         self._modality: str = "image"
         self._total_rounds: int = 10
+        self._log_file = None
 
     @property
     def is_running(self) -> bool:
         return self._process is not None and self._process.poll() is None
 
-    def start(self, modality: str = "image", total_rounds: int = 10, server_address: str | None = None) -> int:
+    def start(
+        self,
+        modality: str = "image",
+        total_rounds: int = 10,
+        total_epochs: int = 2,
+        server_address: str | None = None,
+    ) -> int:
         if self.is_running:
             raise RuntimeError(f"Training already running (pid: {self._process.pid})")
 
@@ -33,19 +40,27 @@ class TrainingService:
                 host = "127.0.0.1"
             server_address = f"{host}:{port}"
 
+        client_id = self._normalize_client_id(config.CLIENT_ID)
         cmd = [
             sys.executable, "fl_worker/client.py",
-            "--client_id", "1",
+            "--client_id", str(client_id),
             "--modality", modality,
             "--total_rounds", str(total_rounds),
+            "--total_epochs", str(total_epochs),
             "--server_address", server_address,
         ]
+
+        log_path = PROJECT_ROOT / "training.log"
+        if self._log_file:
+            self._log_file.close()
+            self._log_file = None
+        self._log_file = open(log_path, "w", encoding="utf-8", buffering=1)
 
         self._process = subprocess.Popen(
             cmd,
             cwd=str(PROJECT_ROOT),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout=self._log_file,
+            stderr=self._log_file,
         )
         self._modality = modality
         self._total_rounds = total_rounds
@@ -60,6 +75,9 @@ class TrainingService:
         except subprocess.TimeoutExpired:
             self._process.kill()
             self._process.wait()
+        if self._log_file:
+            self._log_file.close()
+            self._log_file = None
 
     def get_state(self) -> dict:
         state_file = config.STATE_FILE
@@ -71,6 +89,16 @@ class TrainingService:
 
         training_active = self.is_running
 
+        default_system = {
+            "cpu_percent": 0,
+            "ram_percent": 0,
+            "gpu_percent": 0,
+            "gpu_temp": None,
+            "disk_percent": 0,
+            "latency_ms": 0,
+        }
+        system = {**default_system, **(state.get("system") or {})}
+
         return {
             "client_id": state.get("client_id"),
             "client_name": state.get("client_name", config.CLIENT_NAME),
@@ -80,14 +108,30 @@ class TrainingService:
             "connected_to_flower": state.get("connected_to_flower", False),
             "current_round": state.get("current_round", 0),
             "total_rounds": state.get("total_rounds", self._total_rounds),
+            "current_epoch": state.get("current_epoch", 0),
+            "total_epochs": state.get("total_epochs", 0),
             "loss": state.get("loss"),
             "accuracy": state.get("accuracy"),
+            "train_loss": state.get("train_loss"),
+            "train_accuracy": state.get("train_accuracy"),
+            "val_loss": state.get("val_loss"),
+            "val_accuracy": state.get("val_accuracy"),
+            "precision": state.get("precision"),
+            "recall": state.get("recall"),
+            "f1": state.get("f1"),
+            "auc": state.get("auc"),
             "last_heartbeat": state.get("last_heartbeat"),
             "latency_ms": state.get("latency_ms", 0),
             "training_active": training_active,
-            "system": state.get("system", {
-                "cpu_percent": 0, "ram_percent": 0, "gpu_percent": 0,
-                "gpu_temp": None, "disk_percent": 0, "latency_ms": 0,
-            }),
+            "system": system,
             "recent_logs": state.get("logs", [])[-50:],
         }
+
+    @staticmethod
+    def _normalize_client_id(value: str | int) -> int:
+        if isinstance(value, int):
+            return value
+        text = str(value).strip()
+        if text.startswith("client_"):
+            text = text.split("client_", 1)[1]
+        return int(text) if text.isdigit() else 1

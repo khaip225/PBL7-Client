@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import tempfile
@@ -16,18 +17,34 @@ class DiagnosisService:
 
     def run(self, mode: str, audio_file_path: str | None, image_file_path: str | None) -> dict:
         timestamp = datetime.now()
+        audio_detail = None
 
         if mode == "fusion":
             if not audio_file_path or not image_file_path:
                 raise ValueError("Fusion mode requires both audio and image files")
-            audio_score = self.audio_predictor.predict(audio_file_path)
+            audio_detail = self.audio_predictor.predict_segments(audio_file_path)
+            audio_score = audio_detail["final_score"]
             image_score = self.image_predictor.predict(image_file_path)
-            final_score = self.fusion_engine.fuse(audio_score, image_score)
-            scores = {"audio_score": audio_score, "image_score": image_score, "fusion_score": final_score}
+            fusion_result = self.fusion_engine.fuse(audio_score, image_score)
+            if isinstance(fusion_result, tuple):
+                final_score = fusion_result[0]
+                scores = {
+                    "audio_score": audio_score,
+                    "image_score": image_score,
+                    "fusion_score": final_score,
+                    "fusion_weights": {
+                        "audio": fusion_result[1],
+                        "image": fusion_result[2],
+                    },
+                }
+            else:
+                final_score = fusion_result
+                scores = {"audio_score": audio_score, "image_score": image_score, "fusion_score": final_score}
         elif mode == "audio":
             if not audio_file_path:
                 raise ValueError("Audio mode requires an audio file")
-            audio_score = self.audio_predictor.predict(audio_file_path)
+            audio_detail = self.audio_predictor.predict_segments(audio_file_path)
+            audio_score = audio_detail["final_score"]
             final_score = audio_score
             scores = {"audio_score": audio_score, "image_score": None, "fusion_score": None}
         elif mode == "image":
@@ -43,8 +60,18 @@ class DiagnosisService:
         confidence = (final_score * 100) if label == "Abnormal" else ((1 - final_score) * 100)
 
         audio_dest, image_dest = self.storage_manager.save_files(
-            audio_file_path, image_file_path, label
+            audio_file_path,
+            image_file_path,
+            label,
+            mode=mode,
+            confidence=round(confidence, 1),
+            scores=scores,
         )
+
+        if audio_dest and audio_detail is not None:
+            json_path = os.path.splitext(audio_dest)[0] + ".json"
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(audio_detail, f, ensure_ascii=True, indent=2)
 
         return {
             "mode": mode,

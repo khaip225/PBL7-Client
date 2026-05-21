@@ -13,12 +13,17 @@ export default function TrainingControls({ trainingActive, onStateChange }: Prop
   const [showForm, setShowForm] = useState(false);
   const [modality, setModality] = useState("image");
   const [totalRounds, setTotalRounds] = useState(5);
+  const [totalEpochs, setTotalEpochs] = useState(2);
 
   const handleStart = async () => {
     setLoading(true);
     setError(null);
     try {
-      await api.training.start({ modality, total_rounds: totalRounds });
+      await api.training.start({
+        modality,
+        total_rounds: totalRounds,
+        total_epochs: totalEpochs,
+      });
       setShowForm(false);
       onStateChange();
     } catch (e) {
@@ -77,6 +82,17 @@ export default function TrainingControls({ trainingActive, onStateChange }: Prop
                 className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
               />
             </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-400">Epoch mỗi vòng</label>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={totalEpochs}
+              onChange={(e) => setTotalEpochs(Number(e.target.value))}
+              className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
+            />
           </div>
           <div className="flex gap-3">
             <button

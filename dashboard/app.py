@@ -133,6 +133,8 @@ while True:
             st.subheader("Training Status")
             current_round = state.get("current_round", 0)
             total_rounds = state.get("total_rounds", 0)
+            current_epoch = state.get("current_epoch", 0)
+            total_epochs = state.get("total_epochs", 0)
 
             tc1, tc2, tc3 = st.columns(3)
             with tc1:
@@ -144,9 +146,15 @@ while True:
                 acc = state.get("accuracy")
                 st.metric("Accuracy", f"{acc:.2%}" if acc is not None else "N/A")
 
+            st.metric("Current Epoch", f"{current_epoch}/{total_epochs}")
+
             if total_rounds > 0:
                 pct = min(current_round / total_rounds, 1.0)
                 st.progress(pct, text=f"Progress: {pct:.0%}")
+
+            if total_epochs > 0:
+                epoch_pct = min(current_epoch / total_epochs, 1.0)
+                st.progress(epoch_pct, text=f"Epoch: {epoch_pct:.0%}")
 
         st.divider()
 

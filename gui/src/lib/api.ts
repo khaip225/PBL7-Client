@@ -5,6 +5,10 @@ import type {
   TrainingStartRequest,
   TrainingStartResponse,
   HistoryListResponse,
+  ReviewApproveRequest,
+  ReviewApproveResponse,
+  ReviewListResponse,
+  ReviewStateResponse,
 } from "./types";
 
 const BASE = "";
@@ -50,5 +54,23 @@ export const api = {
       ),
     imageUrl: (id: string) => `/api/history/${id}/image`,
     audioUrl: (id: string) => `/api/history/${id}/audio`,
+  },
+
+  review: {
+    list: (page = 1, pageSize = 20) =>
+      request<ReviewListResponse>(
+        `/api/review/pending?page=${page}&page_size=${pageSize}`
+      ),
+    approve: (recordId: string, body: ReviewApproveRequest) =>
+      request<ReviewApproveResponse>(`/api/review/${recordId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+    getState: () => request<ReviewStateResponse>("/api/review/state"),
+    advanceBatch: () =>
+      request<ReviewStateResponse>("/api/review/advance-batch", {
+        method: "POST",
+      }),
   },
 };
