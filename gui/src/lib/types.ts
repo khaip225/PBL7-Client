@@ -21,6 +21,7 @@ export interface DiagnosisResult {
     audio_dest: string | null;
     image_dest: string | null;
   };
+  heatmap_path: string | null;
   timestamp: string;
 }
 

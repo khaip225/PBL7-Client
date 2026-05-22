@@ -5,7 +5,7 @@ interface Props {
 }
 
 export default function DiagnosisResult({ result }: Props) {
-  const isAbnormal = result.result.label !== "normal";
+  const isAbnormal = result.result.label !== "Normal";
   const { audio_score, image_score, fusion_score } = result.scores;
 
   const scoreLabel = (s: number | null) =>
@@ -14,7 +14,7 @@ export default function DiagnosisResult({ result }: Props) {
   return (
     <div className="card space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-300">Kết quả</h3>
+        <h3 className="text-sm font-semibold text-gray-300">Ket qua</h3>
         <span className="text-xs text-gray-500">{result.timestamp}</span>
       </div>
 
@@ -30,12 +30,8 @@ export default function DiagnosisResult({ result }: Props) {
             isAbnormal ? "bg-red-400" : "bg-green-400"
           }`}
         />
-        <span
-          className={`text-lg font-bold ${
-            isAbnormal ? "text-red-400" : "text-green-400"
-          }`}
-        >
-          {isAbnormal ? "Bất thường" : "Bình thường"}
+        <span className={`text-lg font-bold ${isAbnormal ? "text-red-400" : "text-green-400"}`}>
+          {isAbnormal ? "Bat thuong" : "Binh thuong"}
         </span>
         <span className="text-sm text-gray-400 ml-auto">
           {result.result.label}

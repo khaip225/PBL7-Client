@@ -35,6 +35,7 @@ class DiagnosisResponse(BaseModel):
     result: DiagnosisResult
     scores: ScoreDetail
     saved: SavedPaths
+    heatmap_path: str | None = None
     timestamp: str
 
 

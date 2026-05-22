@@ -33,9 +33,15 @@ class DiagnosisService:
         elif mode == "image":
             if not image_file_path:
                 raise ValueError("Image mode requires an image file")
-            image_score = self.image_predictor.predict(image_file_path)
+            # Dùng predict_with_gradcam để có cả score + heatmap
+            heatmap_dir = os.path.join(self.storage_manager.client_dir, "heatmaps")
+            result = self.image_predictor.predict_with_gradcam(
+                image_file_path, save_dir=heatmap_dir
+            )
+            image_score = result["prob"]
             final_score = image_score
             scores = {"audio_score": None, "image_score": image_score, "fusion_score": None}
+            heatmap_path = result.get("heatmap_path")
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
@@ -62,5 +68,6 @@ class DiagnosisService:
                 "audio_dest": audio_dest,
                 "image_dest": image_dest,
             },
+            "heatmap_path": heatmap_path if mode == "image" else None,
             "timestamp": timestamp.isoformat(),
         }
