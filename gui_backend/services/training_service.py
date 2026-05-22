@@ -6,9 +6,21 @@ import sys
 from pathlib import Path
 
 from config import config
-
+from fl_worker.api_client import api_client
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _check_data_for_modality(modality: str) -> bool:
+    """Kiểm tra client có dữ liệu training cho modality này không."""
+    base = Path(config.FL_DATA_DIR)
+    if modality == "audio":
+        csv_path = base / "metadata" / "audio_fl" / "client_1_train.csv"
+        return csv_path.exists()
+    elif modality == "image":
+        img_dir = base / "fl_image"
+        return img_dir.exists() and any(img_dir.iterdir())
+    return False
 
 
 class TrainingService:
@@ -16,14 +28,34 @@ class TrainingService:
         self._process: subprocess.Popen | None = None
         self._modality: str = "image"
         self._total_rounds: int = 10
+        self._job_id: str | None = None
 
     @property
     def is_running(self) -> bool:
         return self._process is not None and self._process.poll() is None
 
-    def start(self, modality: str = "image", total_rounds: int = 10, server_address: str | None = None) -> int:
+    def get_available_jobs(self) -> list[dict]:
+        """Lấy danh sách job training từ VPS, có kiểm tra data."""
+        raw = api_client.get_available_jobs()
+        enriched = []
+        for job in raw:
+            job["has_data"] = _check_data_for_modality(job.get("task_type", ""))
+            enriched.append(job)
+        return enriched
+
+    def start(self, modality: str = "image", total_rounds: int = 10,
+              server_address: str | None = None, job_id: str | None = None) -> int:
         if self.is_running:
             raise RuntimeError(f"Training already running (pid: {self._process.pid})")
+
+        if job_id:
+            # Flow mới: join job trên VPS trước
+            join_result = api_client.join_job(job_id)
+            if not join_result:
+                raise RuntimeError("Không thể tham gia job training trên server")
+            server_address = join_result.get("server_address", server_address)
+            modality = join_result.get("task_type", modality)
+            total_rounds = join_result.get("num_rounds", total_rounds)
 
         if server_address is None:
             port = 8080 if modality == "audio" else 8081
@@ -49,6 +81,7 @@ class TrainingService:
         )
         self._modality = modality
         self._total_rounds = total_rounds
+        self._job_id = job_id
         return self._process.pid
 
     def stop(self):
@@ -85,6 +118,8 @@ class TrainingService:
             "last_heartbeat": state.get("last_heartbeat"),
             "latency_ms": state.get("latency_ms", 0),
             "training_active": training_active,
+            "job_id": self._job_id,
+            "dataset_info": state.get("dataset_info", {}),
             "system": state.get("system", {
                 "cpu_percent": 0, "ram_percent": 0, "gpu_percent": 0,
                 "gpu_temp": None, "disk_percent": 0, "latency_ms": 0,

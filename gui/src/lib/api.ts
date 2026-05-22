@@ -4,6 +4,7 @@ import type {
   TrainingState,
   TrainingStartRequest,
   TrainingStartResponse,
+  AvailableJob,
   HistoryListResponse,
 } from "./types";
 
@@ -31,6 +32,7 @@ export const api = {
 
   training: {
     getState: () => request<TrainingState>("/api/training/state"),
+    availableJobs: () => request<AvailableJob[]>("/api/training/available-jobs"),
     start: (body: TrainingStartRequest) =>
       request<TrainingStartResponse>("/api/training/start", {
         method: "POST",

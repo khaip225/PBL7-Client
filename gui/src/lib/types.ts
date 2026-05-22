@@ -33,6 +33,14 @@ export interface SystemMetrics {
   latency_ms: number;
 }
 
+export interface DatasetInfo {
+  total_samples: number;
+  audio_samples: number;
+  image_samples: number;
+  has_audio: boolean;
+  has_image: boolean;
+}
+
 export interface TrainingState {
   client_id: string | null;
   client_name: string;
@@ -47,6 +55,7 @@ export interface TrainingState {
   last_heartbeat: string | null;
   latency_ms: number;
   training_active: boolean;
+  dataset_info: DatasetInfo;
   system: SystemMetrics;
   recent_logs: LogEntry[];
 }
@@ -76,10 +85,23 @@ export interface HistoryListResponse {
   page_size: number;
 }
 
+export interface AvailableJob {
+  job_id: string;
+  name: string;
+  task_type: string;
+  num_rounds: number;
+  min_clients: number;
+  joined_clients: string[];
+  port: number;
+  strategy: string;
+  has_data: boolean;
+}
+
 export interface TrainingStartRequest {
   modality: string;
   total_rounds: number;
   server_address?: string;
+  job_id?: string;
 }
 
 export interface TrainingStartResponse {
@@ -87,4 +109,5 @@ export interface TrainingStartResponse {
   pid: number;
   modality: string;
   total_rounds: number;
+  job_id?: string | null;
 }

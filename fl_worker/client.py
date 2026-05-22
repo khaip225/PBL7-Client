@@ -8,7 +8,6 @@ from dataset_loader import load_client_data, load_client_data_image
 import copy
 import sys
 import os
-import atexit
 from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from ai_engines.audio_engine.cnn14_model import CNN14, freeze_model_blocks
@@ -158,19 +157,14 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Khoi dong Client {args.client_id} ({args.modality.upper()}) tren {device}...")
 
-    # ---- FastAPI registration (idempotent by client_name) ----
-    client_uuid = api_client.register(task_type=args.modality)
-    if client_uuid:
-        print(f"Registered with FastAPI: {client_uuid}")
+    # ---- Update training state (GUI backend already registered & started heartbeat) ----
     api_client.update_training_state(
         modality=args.modality,
         total_rounds=args.total_rounds,
         connected_to_flower=False,
+        current_round=0,
+        status="connecting",
     )
-
-    # ---- Start heartbeat ----
-    api_client.start_heartbeat()
-    atexit.register(api_client.shutdown)
 
     # ---- Load model + data ----
     if args.modality == "audio":
@@ -183,7 +177,7 @@ if __name__ == "__main__":
         trainloader, valloader = load_client_data_image(args.client_id, base_dir="./fl_worker/fl_data")
 
     # ---- Start Flower client (blocking) ----
-    api_client.update_training_state(connected_to_flower=True, status="online")
+    api_client.update_training_state(connected_to_flower=True, status="training")
     print(f"Ket noi den Flower server {args.server_address}...")
 
     try:
@@ -195,4 +189,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nInterrupted. Shutting down...")
     finally:
-        api_client.shutdown()
+        api_client.update_training_state(
+            connected_to_flower=False,
+            training_active=False,
+            status="online",
+        )

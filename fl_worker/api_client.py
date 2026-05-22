@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import requests
 
 from config import config
-from fl_worker.monitor import SystemMonitor
+from fl_worker.monitor import SystemMonitor, scan_dataset_info
 
 logger = logging.getLogger("api_client")
 
@@ -61,7 +61,7 @@ class FastAPIClient:
         if hardware_info is None:
             hardware_info = self._monitor.get_hardware_info()
         if dataset_info is None:
-            dataset_info = {}
+            dataset_info = scan_dataset_info(config.FL_DATA_DIR)
 
         payload = {
             "client_name": config.CLIENT_NAME,
@@ -84,6 +84,7 @@ class FastAPIClient:
                 client_id=str(self.client_id),
                 connected_to_server=True,
                 status="online",
+                dataset_info=dataset_info,
             )
             self._add_log("info", f"Registered with server as {self.client_id}")
             logger.info("Registered client_id=%s", self.client_id)
@@ -125,6 +126,32 @@ class FastAPIClient:
         except Exception as e:
             logger.warning("Failed to send offline: %s", e)
 
+    def get_available_jobs(self) -> list[dict]:
+        """Poll VPS for available training jobs."""
+        try:
+            resp = self._session.get(
+                f"{self.base_url}/api/jobs/available",
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.warning("Failed to fetch available jobs: %s", e)
+            return []
+
+    def join_job(self, job_id: str) -> dict | None:
+        """Join a training job on VPS, get connection info."""
+        try:
+            resp = self._session.post(
+                f"{self.base_url}/api/jobs/{job_id}/join",
+                timeout=10,
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.error("Failed to join job %s: %s", job_id, e)
+            return None
+
     def update_training_state(self, **kwargs):
         """Update local training state (called from FL client callbacks)."""
         self._update_state(**kwargs)
@@ -153,6 +180,7 @@ class FastAPIClient:
                         "gpu_temp": metrics.get("gpu_temp"),
                     },
                     "task_type": self._state.get("modality"),
+                    "dataset_info": self._state.get("dataset_info", {}),
                 }
                 resp = self._session.post(
                     f"{self.base_url}/api/clients/{self.client_id}/heartbeat",

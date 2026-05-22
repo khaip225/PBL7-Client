@@ -1,13 +1,36 @@
+import { useState, useCallback, useEffect } from "react";
 import { useTrainingState } from "../../hooks/useTrainingState";
 import ConnectionStatus from "./ConnectionStatus";
 import TrainingProgress from "./TrainingProgress";
 import MetricsDisplay from "./MetricsDisplay";
 import SystemMetrics from "./SystemMetrics";
 import TrainingControls from "./TrainingControls";
+import DatasetCard from "./DatasetCard";
+import type { AvailableJob } from "../../lib/types";
+import { api } from "../../lib/api";
 import { Loader2 } from "lucide-react";
 
 export default function TrainingPage() {
   const { state, loading, error, refetch } = useTrainingState();
+  const [availableJobs, setAvailableJobs] = useState<AvailableJob[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(true);
+
+  const fetchJobs = useCallback(async () => {
+    try {
+      const jobs = await api.training.availableJobs();
+      setAvailableJobs(jobs);
+    } catch {
+      // Silently fail — VPS may be unreachable
+    } finally {
+      setJobsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchJobs();
+    const interval = setInterval(fetchJobs, 5000);
+    return () => clearInterval(interval);
+  }, [fetchJobs]);
 
   if (loading && !state) {
     return (
@@ -61,9 +84,12 @@ export default function TrainingPage() {
         </div>
         <div className="space-y-6">
           <SystemMetrics metrics={state.system} />
+          <DatasetCard dataset={state.dataset_info} />
           <TrainingControls
             trainingActive={state.training_active}
             onStateChange={refetch}
+            availableJobs={availableJobs}
+            jobsLoading={jobsLoading}
           />
         </div>
       </div>

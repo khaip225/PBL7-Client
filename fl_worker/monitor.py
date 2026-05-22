@@ -1,7 +1,50 @@
+import os
 import platform
 import time
 
 import psutil
+
+
+def scan_dataset_info(fl_data_dir: str = "./fl_worker/fl_data") -> dict:
+    """Đếm số lượng sample audio và image trong thư mục FL data."""
+    base = fl_data_dir
+    info = {
+        "total_samples": 0,
+        "audio_samples": 0,
+        "image_samples": 0,
+        "has_audio": False,
+        "has_image": False,
+    }
+
+    # Audio: đếm dòng trong CSV metadata
+    audio_metadata_dir = os.path.join(base, "metadata", "audio_fl")
+    if os.path.isdir(audio_metadata_dir):
+        import csv
+        for fname in os.listdir(audio_metadata_dir):
+            if fname.endswith(".csv"):
+                fpath = os.path.join(audio_metadata_dir, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        count = sum(1 for _ in f) - 1  # trừ header
+                        if count > 0:
+                            info["audio_samples"] += count
+                except Exception:
+                    pass
+
+    # Image: đếm file ảnh trong thư mục fl_image
+    image_dir = os.path.join(base, "fl_image")
+    if os.path.isdir(image_dir):
+        count = 0
+        for root, dirs, files in os.walk(image_dir):
+            for f in files:
+                if f.lower().endswith((".png", ".jpg", ".jpeg")):
+                    count += 1
+        info["image_samples"] = count
+
+    info["total_samples"] = info["audio_samples"] + info["image_samples"]
+    info["has_audio"] = info["audio_samples"] > 0
+    info["has_image"] = info["image_samples"] > 0
+    return info
 
 
 class SystemMonitor:
@@ -46,7 +89,6 @@ class SystemMonitor:
 
         if self._gpu_available and self._torch:
             try:
-                # pynvml for detailed GPU stats
                 import pynvml
                 pynvml.nvmlInit()
                 handle = pynvml.nvmlDeviceGetHandleByIndex(0)
@@ -60,9 +102,14 @@ class SystemMonitor:
                     pass
                 pynvml.nvmlShutdown()
             except ImportError:
-                # Fallback: just report GPU memory usage
-                mem = self._torch.cuda.memory_reserved(0) / self._torch.cuda.max_memory_reserved(0)
-                metrics["gpu_percent"] = round(mem * 100, 1) if mem > 0 else 0
+                # No pynvml — report GPU memory usage if measurable
+                try:
+                    reserved = self._torch.cuda.memory_reserved(0)
+                    total = self._torch.cuda.get_device_properties(0).total_memory
+                    if total > 0:
+                        metrics["gpu_percent"] = round((reserved / total) * 100, 1)
+                except Exception:
+                    pass
             except Exception:
                 pass
 

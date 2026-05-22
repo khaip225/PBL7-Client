@@ -38,10 +38,23 @@ class DiagnosisResponse(BaseModel):
     timestamp: str
 
 
+class AvailableJob(BaseModel):
+    job_id: str
+    name: str
+    task_type: str
+    num_rounds: int
+    min_clients: int
+    joined_clients: list[str] = []
+    port: int
+    strategy: str
+    has_data: bool = False
+
+
 class TrainingStartRequest(BaseModel):
     modality: str = "image"
     total_rounds: int = 10
     server_address: str | None = None
+    job_id: str | None = None
 
 
 class TrainingStartResponse(BaseModel):
@@ -49,6 +62,7 @@ class TrainingStartResponse(BaseModel):
     pid: int
     modality: str
     total_rounds: int
+    job_id: str | None = None
 
 
 class TrainingStopResponse(BaseModel):
@@ -71,6 +85,14 @@ class LogEntry(BaseModel):
     message: str
 
 
+class DatasetInfo(BaseModel):
+    total_samples: int = 0
+    audio_samples: int = 0
+    image_samples: int = 0
+    has_audio: bool = False
+    has_image: bool = False
+
+
 class TrainingStateResponse(BaseModel):
     client_id: str | None = None
     client_name: str
@@ -85,6 +107,7 @@ class TrainingStateResponse(BaseModel):
     last_heartbeat: str | None = None
     latency_ms: int = 0
     training_active: bool
+    dataset_info: DatasetInfo = DatasetInfo()
     system: SystemMetrics
     recent_logs: list[LogEntry] = []
 

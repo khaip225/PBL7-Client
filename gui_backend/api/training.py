@@ -1,5 +1,8 @@
 from fastapi import APIRouter, Request, HTTPException
-from ..models.schemas import TrainingStartRequest, TrainingStartResponse, TrainingStopResponse, TrainingStateResponse
+from ..models.schemas import (
+    TrainingStartRequest, TrainingStartResponse, TrainingStopResponse,
+    TrainingStateResponse, AvailableJob,
+)
 
 router = APIRouter()
 
@@ -10,6 +13,14 @@ async def get_training_state(request: Request):
     return TrainingStateResponse(**service.get_state())
 
 
+@router.get("/api/training/available-jobs")
+async def get_available_jobs(request: Request):
+    """Lấy danh sách job training từ VPS mà client có thể tham gia."""
+    service = request.app.state.training_service
+    jobs = service.get_available_jobs()
+    return jobs
+
+
 @router.post("/api/training/start", response_model=TrainingStartResponse)
 async def start_training(body: TrainingStartRequest, request: Request):
     service = request.app.state.training_service
@@ -18,10 +29,14 @@ async def start_training(body: TrainingStartRequest, request: Request):
             modality=body.modality,
             total_rounds=body.total_rounds,
             server_address=body.server_address,
+            job_id=body.job_id,
         )
     except RuntimeError as e:
         raise HTTPException(409, str(e))
-    return TrainingStartResponse(status="started", pid=pid, modality=body.modality, total_rounds=body.total_rounds)
+    return TrainingStartResponse(
+        status="started", pid=pid, modality=body.modality,
+        total_rounds=body.total_rounds, job_id=body.job_id,
+    )
 
 
 @router.post("/api/training/stop", response_model=TrainingStopResponse)
