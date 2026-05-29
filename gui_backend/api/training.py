@@ -28,14 +28,19 @@ async def start_training(body: TrainingStartRequest, request: Request):
         pid = service.start(
             modality=body.modality,
             total_rounds=body.total_rounds,
+            total_epochs=body.total_epochs,
             server_address=body.server_address,
             job_id=body.job_id,
         )
     except RuntimeError as e:
         raise HTTPException(409, str(e))
     return TrainingStartResponse(
-        status="started", pid=pid, modality=body.modality,
-        total_rounds=body.total_rounds, job_id=body.job_id,
+        status="started",
+        pid=pid,
+        modality=body.modality,
+        total_rounds=body.total_rounds,
+        total_epochs=body.total_epochs,
+        job_id=body.job_id,
     )
 
 

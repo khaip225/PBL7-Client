@@ -5,7 +5,17 @@ interface Props {
   value: string | number;
   unit?: string;
   icon?: ReactNode;
-  color?: "blue" | "green" | "red" | "yellow" | "gray";
+  color?:
+    | "blue"
+    | "green"
+    | "red"
+    | "yellow"
+    | "gray"
+    | "orange"
+    | "teal"
+    | "purple"
+    | "pink"
+    | "indigo";
 }
 
 const colorMap = {
@@ -14,6 +24,11 @@ const colorMap = {
   red: "text-red-400 bg-red-600/10",
   yellow: "text-yellow-400 bg-yellow-600/10",
   gray: "text-gray-400 bg-gray-600/10",
+  orange: "text-orange-400 bg-orange-600/10",
+  teal: "text-teal-400 bg-teal-600/10",
+  purple: "text-purple-400 bg-purple-600/10",
+  pink: "text-pink-400 bg-pink-600/10",
+  indigo: "text-indigo-400 bg-indigo-600/10",
 };
 
 export default function StatCard({ label, value, unit, icon, color = "blue" }: Props) {

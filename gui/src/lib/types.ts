@@ -59,8 +59,18 @@ export interface TrainingState {
   connected_to_flower: boolean;
   current_round: number;
   total_rounds: number;
+  current_epoch: number;
+  total_epochs: number;
   loss: number | null;
   accuracy: number | null;
+  train_loss: number | null;
+  train_accuracy: number | null;
+  val_loss: number | null;
+  val_accuracy: number | null;
+  precision: number | null;
+  recall: number | null;
+  f1: number | null;
+  auc: number | null;
   last_heartbeat: string | null;
   latency_ms: number;
   training_active: boolean;
@@ -106,9 +116,31 @@ export interface AvailableJob {
   has_data: boolean;
 }
 
+export interface ReviewListResponse extends HistoryListResponse {}
+
+export interface ReviewApproveRequest {
+  label: string;
+}
+
+export interface ReviewApproveResponse {
+  record_id: string;
+  label: string;
+  audio_dest: string | null;
+  image_dest: string | null;
+  batch_dir: string;
+  csv_path: string | null;
+}
+
+export interface ReviewStateResponse {
+  current_batch: number;
+  client_id: string;
+  threshold: number;
+}
+
 export interface TrainingStartRequest {
   modality: string;
   total_rounds: number;
+  total_epochs: number;
   server_address?: string;
   job_id?: string;
 }
@@ -118,6 +150,7 @@ export interface TrainingStartResponse {
   pid: number;
   modality: string;
   total_rounds: number;
+  total_epochs: number;
   job_id?: string | null;
 }
 

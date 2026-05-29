@@ -10,6 +10,8 @@ import sys
 import os
 import numpy as np
 from tqdm import tqdm
+import json
+from pathlib import Path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Add PBL7-Server path for shared modules
@@ -40,7 +42,7 @@ def compute_auroc(all_probs, all_labels, num_classes):
 
 class AdvancedPneumoniaClient(fl.client.NumPyClient):
     def __init__(self, client_id, model, trainloader, valloader, device,
-                 num_classes=1, lr=1e-4, mu=0.001):
+                 num_classes=1, lr=1e-4, mu=0.001, local_epochs=2):
         self.client_id = client_id
         self.model = model
         self.trainloader = trainloader
@@ -50,6 +52,7 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
         self.criterion = nn.BCEWithLogitsLoss()
         self.lr = lr
         self.mu = mu
+        self.local_epochs = local_epochs
         self.current_round = 0
 
     def get_parameters(self, config):
@@ -75,17 +78,27 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
             lr=self.lr, weight_decay=1e-4
         )
 
-        local_epochs = 2
+        local_epochs = self.local_epochs
         total_steps = len(self.trainloader) * local_epochs
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=total_steps)
 
-        api_client.update_training_state(current_round=self.current_round, status="training")
+        api_client.update_training_state(
+            current_round=self.current_round,
+            current_epoch=0,
+            total_epochs=local_epochs,
+            status="training",
+        )
 
         total_train_loss = 0.0
         total_train_samples = 0
+        total_train_correct = 0
         for epoch in range(local_epochs):
             print(f"\n--- Epoch {epoch+1}/{local_epochs} ---")
-            progress_bar = tqdm(self.trainloader, desc="Training")
+            progress_bar = tqdm(self.trainloader, desc="Training", file=sys.stdout, dynamic_ncols=True)
+
+            epoch_loss = 0.0
+            epoch_samples = 0
+            epoch_correct = 0
 
             for inputs, labels in progress_bar:
                 inputs = inputs.to(self.device)
@@ -109,22 +122,47 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
 
                 total_train_loss += loss.item() * inputs.size(0)
                 total_train_samples += inputs.size(0)
+                epoch_loss += loss.item() * inputs.size(0)
+                epoch_samples += inputs.size(0)
+                with torch.no_grad():
+                    probs = torch.sigmoid(outputs)
+                    preds = (probs >= 0.5).float()
+                    epoch_correct += (preds == labels).sum().item()
+                    total_train_correct += (preds == labels).sum().item()
                 progress_bar.set_postfix({'loss': f"{loss.item():.4f}"})
 
+            epoch_avg_loss = epoch_loss / epoch_samples if epoch_samples > 0 else 0.0
+            epoch_acc = epoch_correct / epoch_samples if epoch_samples > 0 else 0.0
+            api_client.update_training_state(
+                current_round=self.current_round,
+                current_epoch=epoch + 1,
+                total_epochs=local_epochs,
+                train_loss=epoch_avg_loss,
+                train_accuracy=epoch_acc,
+                status="training",
+            )
+
         avg_train_loss = total_train_loss / total_train_samples if total_train_samples > 0 else 0.0
+        avg_train_acc = total_train_correct / total_train_samples if total_train_samples > 0 else 0.0
 
         # Multi-label evaluation: compute per-class AUROC
         val_auroc_macro = None
         per_class_auroc = {}
+        val_loss = None
         if self.valloader and len(self.valloader.dataset) > 0:
             self.model.eval()
             all_probs_list = []
             all_labels_list = []
+            total_val_loss = 0.0
+            total_val = 0
             with torch.no_grad():
                 for inputs, labels in self.valloader:
                     inputs = inputs.to(self.device)
                     labels = labels.float().to(self.device)
                     outputs = self.model(inputs)
+                    loss = self.criterion(outputs, labels)
+                    total_val_loss += loss.item() * inputs.size(0)
+                    total_val += labels.size(0)
                     probs = torch.sigmoid(outputs)
                     all_probs_list.append(probs.cpu().numpy())
                     all_labels_list.append(labels.cpu().numpy())
@@ -132,11 +170,19 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
             all_probs = np.concatenate(all_probs_list, axis=0)
             all_labels_np = np.concatenate(all_labels_list, axis=0)
             val_auroc_macro, per_class_auroc = compute_auroc(all_probs, all_labels_np, self.num_classes)
+            val_loss = float(total_val_loss / total_val) if total_val > 0 else None
 
         api_client.update_training_state(
             current_round=self.current_round,
-            loss=avg_train_loss,
-            accuracy=val_auroc_macro,
+            current_epoch=local_epochs,
+            total_epochs=local_epochs,
+            train_loss=avg_train_loss,
+            train_accuracy=avg_train_acc,
+            val_loss=val_loss,
+            val_accuracy=val_auroc_macro,
+            loss=val_loss if val_loss is not None else avg_train_loss,
+            accuracy=val_auroc_macro if val_auroc_macro is not None else avg_train_acc,
+            status="evaluating",
         )
         return self.get_parameters(config={}), len(self.trainloader.dataset), {
             "loss": avg_train_loss,
@@ -175,6 +221,8 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
         api_client.update_training_state(
             loss=avg_loss,
             accuracy=auroc_macro,
+            val_loss=avg_loss,
+            val_accuracy=float(auroc_macro),
             current_round=self.current_round,
             status="evaluating",
         )
@@ -276,12 +324,30 @@ class PrototypeAlignmentClient(fl.client.NumPyClient):
         return 0.0, 1, {"loss": 0.0}
 
 
+def _resolve_base_dir() -> str:
+    """Resolve FL data directory based on current batch from fl_state.json."""
+    state_path = Path(__file__).resolve().parent.parent / "local_managers" / "fl_state.json"
+    if state_path.exists():
+        try:
+            with state_path.open("r", encoding="utf-8") as f:
+                state = json.load(f)
+            current_batch = int(state.get("current_batch", 1))
+            if current_batch <= 0:
+                return "./fl_worker/fl_data"
+            else:
+                return os.path.join("./fl_worker", f"fl_data_{current_batch}")
+        except (ValueError, json.JSONDecodeError, OSError):
+            pass
+    return "./fl_worker/fl_data"
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--client_id", type=int, required=True)
     parser.add_argument("--server_address", type=str, default=None)
     parser.add_argument("--modality", type=str, choices=["audio", "image", "alignment"], default="audio")
     parser.add_argument("--total_rounds", type=int, default=10)
+    parser.add_argument("--total_epochs", type=int, default=2, help="Local epochs per round")
     args = parser.parse_args()
 
     if args.server_address is None:
@@ -295,10 +361,13 @@ if __name__ == "__main__":
     api_client.update_training_state(
         modality=args.modality,
         total_rounds=args.total_rounds,
+        total_epochs=args.total_epochs,
         connected_to_flower=False,
         current_round=0,
         status="connecting",
     )
+
+    base_dir = _resolve_base_dir()
 
     if args.modality == "alignment":
         from prototype_fl_model import FLPrototypeModel
@@ -309,8 +378,8 @@ if __name__ == "__main__":
             audio_pretrained_path=os.path.join(server_flower, 'pretrained_audio_multilabel.pth'),
         ).to(device)
 
-        image_loader, _ = load_client_data_image(args.client_id, base_dir="./fl_worker/fl_data")
-        audio_loader, _ = load_client_data(args.client_id, base_dir="./fl_worker/fl_data")
+        image_loader, _ = load_client_data_image(args.client_id, base_dir=base_dir)
+        audio_loader, _ = load_client_data(args.client_id, base_dir=base_dir)
 
         client = PrototypeAlignmentClient(
             args.client_id, prototype_model, image_loader, audio_loader, device
@@ -318,18 +387,27 @@ if __name__ == "__main__":
     elif args.modality == "audio":
         model = ASTMultiLabel(num_classes=2)
         model = freeze_early_blocks(model).to(device)
-        trainloader, valloader = load_client_data(args.client_id, base_dir="./fl_worker/fl_data")
+        audio_dir = os.path.join(base_dir, "fl_audio")
+        train_csv = os.path.join(base_dir, "metadata", "audio_fl", f"client_{args.client_id}_train.csv")
+        val_csv = os.path.join(base_dir, "metadata", "audio_fl", f"client_{args.client_id}_val.csv")
+        print(f"[Debug] Audio base_dir: {base_dir}")
+        print(f"[Debug] Audio dir: {audio_dir}")
+        print(f"[Debug] Train CSV: {train_csv}")
+        print(f"[Debug] Val CSV: {val_csv}")
+        trainloader, valloader = load_client_data(args.client_id, base_dir=base_dir)
         num_classes = 2
         client = AdvancedPneumoniaClient(
-            args.client_id, model, trainloader, valloader, device, num_classes=num_classes
+            args.client_id, model, trainloader, valloader, device,
+            num_classes=num_classes, local_epochs=args.total_epochs
         ).to_client()
     else:
         model = DenseNet121MultiLabel(num_classes=3)
         model = freeze_backbone(model).to(device)
-        trainloader, valloader = load_client_data_image(args.client_id, base_dir="./fl_worker/fl_data")
+        trainloader, valloader = load_client_data_image(args.client_id, base_dir=base_dir)
         num_classes = 3
         client = AdvancedPneumoniaClient(
-            args.client_id, model, trainloader, valloader, device, num_classes=num_classes
+            args.client_id, model, trainloader, valloader, device,
+            num_classes=num_classes, local_epochs=args.total_epochs
         ).to_client()
 
     api_client.update_training_state(connected_to_flower=True, status="training")

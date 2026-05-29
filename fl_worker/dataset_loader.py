@@ -1,4 +1,7 @@
+import json
 import os
+import sys
+from pathlib import Path
 import torch
 import torchaudio
 import soundfile as sf
@@ -8,6 +11,34 @@ import numpy as np
 from PIL import Image
 from torchvision import transforms
 from torch.utils.data import Dataset, DataLoader
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from config import config
+
+
+def _load_fl_state(state_file: Path) -> dict:
+    if not state_file.exists():
+        return {"current_batch": 0}
+    try:
+        with state_file.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {"current_batch": 0}
+
+
+def _resolve_fl_base_dir(base_dir: str | None = None, state_file: str | None = None) -> str:
+    base = Path(base_dir or config.FL_DATA_DIR).resolve()
+    if base.name.startswith("fl_data_"):
+        return str(base)
+
+    parent = base.parent if base.name.startswith("fl_data") else base
+    state_path = Path(state_file or (Path(__file__).resolve().parent.parent / "local_managers" / "fl_state.json"))
+    state = _load_fl_state(state_path)
+    batch = int(state.get("current_batch", 0))
+
+    if batch <= 0:
+        return str(parent / "fl_data")
+    return str(parent / f"fl_data_{batch}")
 
 
 class AudioPneumoniaDataset(Dataset):
@@ -84,7 +115,8 @@ class AudioPneumoniaDataset(Dataset):
         return mel_spec_db, labels
 
 
-def load_client_data(client_id, batch_size=16, base_dir="./fl_data"):
+def load_client_data(client_id, batch_size=16, base_dir=None, state_file=None):
+    base_dir = _resolve_fl_base_dir(base_dir, state_file)
     audio_dir = os.path.join(base_dir, "fl_audio")
 
     train_csv = os.path.join(base_dir, "metadata", "audio_fl", f"client_{client_id}_train.csv")
@@ -163,7 +195,8 @@ class ImagePneumoniaDataset(Dataset):
         return image, labels
 
 
-def load_client_data_image(client_id, batch_size=16, base_dir="./fl_data"):
+def load_client_data_image(client_id, batch_size=16, base_dir=None, state_file=None):
+    base_dir = _resolve_fl_base_dir(base_dir, state_file)
     client_dir = os.path.join(base_dir, "fl_image", f"client_{client_id}")
 
     if not os.path.exists(client_dir):

@@ -13,6 +13,10 @@ interface Props {
 export default function TrainingControls({ trainingActive, onStateChange, availableJobs, jobsLoading }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [modality, setModality] = useState("image");
+  const [totalRounds, setTotalRounds] = useState(5);
+  const [totalEpochs, setTotalEpochs] = useState(2);
   const [joiningId, setJoiningId] = useState<string | null>(null);
 
   const handleJoin = async (job: AvailableJob) => {
@@ -23,6 +27,7 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
       await api.training.start({
         modality: job.task_type,
         total_rounds: job.num_rounds,
+        total_epochs: totalEpochs,
         job_id: job.job_id,
       });
       onStateChange();
@@ -31,6 +36,24 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
     } finally {
       setLoading(false);
       setJoiningId(null);
+    }
+  };
+
+  const handleStart = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await api.training.start({
+        modality,
+        total_rounds: totalRounds,
+        total_epochs: totalEpochs,
+      });
+      setShowForm(false);
+      onStateChange();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Lỗi bắt đầu training");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -126,6 +149,72 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
           {availableJobs.length === 0 && !jobsLoading && (
             <div className="text-center py-3 text-xs text-gray-500">
               Không có job training nào từ server
+            </div>
+          )}
+
+          {/* Manual start button */}
+          {!showForm && (
+            <button
+              onClick={() => setShowForm(true)}
+              className="w-full btn-primary flex items-center justify-center gap-2 text-sm py-1.5 mt-3"
+            >
+              <Play size={14} />
+              Bắt đầu training thủ công
+            </button>
+          )}
+
+          {/* Manual training form */}
+          {showForm && (
+            <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-3 space-y-3 mt-3">
+              <div>
+                <label className="text-xs text-gray-400">Modality</label>
+                <select
+                  value={modality}
+                  onChange={(e) => setModality(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
+                >
+                  <option value="image">Hình ảnh (X-quang)</option>
+                  <option value="audio">Âm thanh (Phổi)</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Số vòng (rounds)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={totalRounds}
+                  onChange={(e) => setTotalRounds(Number(e.target.value))}
+                  className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Epoch mỗi vòng</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={totalEpochs}
+                  onChange={(e) => setTotalEpochs(Number(e.target.value))}
+                  className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleStart}
+                  disabled={loading}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  {loading && <Loader2 size={14} className="animate-spin" />}
+                  Xác nhận
+                </button>
+                <button
+                  onClick={() => setShowForm(false)}
+                  className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
+                >
+                  Hủy
+                </button>
+              </div>
             </div>
           )}
         </div>

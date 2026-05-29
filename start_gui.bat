@@ -17,6 +17,6 @@ timeout /t 4 /nobreak >nul
 start http://localhost:5173
 
 echo.
-echo Da khoi dong. Backend: http://localhost:8001 | Frontend: http://localhost:5173
+echo Da khoi dong. Backend: http://localhost:8001 ^| Frontend: http://localhost:5173
 echo.
 pause

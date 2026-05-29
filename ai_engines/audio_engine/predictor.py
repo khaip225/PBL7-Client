@@ -1,8 +1,8 @@
 import torch
 import torchaudio
 import torch.nn.functional as F
-import soundfile as sf
 import numpy as np
+import soundfile as sf
 from PIL import Image
 
 from config import config
@@ -22,13 +22,15 @@ class AudioPredictor:
         self._load_model()
 
         self.target_sr = 16000
+        self.chunk_duration = config.AUDIO_CHUNK_DURATION if hasattr(config, 'AUDIO_CHUNK_DURATION') else 15
+        self.overlap = config.AUDIO_CHUNK_OVERLAP if hasattr(config, 'AUDIO_CHUNK_OVERLAP') else 0.0
         self.max_length = 15
         self.n_mels = 128
 
         self.mel_spectrogram = torchaudio.transforms.MelSpectrogram(
             sample_rate=self.target_sr, n_fft=1024, hop_length=512, n_mels=self.n_mels
-        )
-        self.amplitude_to_db = torchaudio.transforms.AmplitudeToDB()
+        ).to(self.device)
+        self.amplitude_to_db = torchaudio.transforms.AmplitudeToDB().to(self.device)
 
     def _load_model(self):
         try:
@@ -42,7 +44,28 @@ class AudioPredictor:
             print(f"[AudioPredictor] Failed to load model: {e}, using random weights")
             self.model.eval()
 
+    def _load_audio(self, audio_path: str) -> torch.Tensor:
+        try:
+            waveform, sr = torchaudio.load(audio_path)
+        except Exception:
+            waveform_np, sr = sf.read(audio_path)
+            waveform = torch.from_numpy(waveform_np).float()
+            if waveform.ndim == 1:
+                waveform = waveform.unsqueeze(0)
+            elif waveform.ndim == 2:
+                waveform = waveform.transpose(0, 1)
+
+        if waveform.shape[0] > 1:
+            waveform = torch.mean(waveform, dim=0, keepdim=True)
+
+        if sr != self.target_sr:
+            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.target_sr)
+            waveform = resampler(waveform)
+
+        return waveform
+
     def preprocess(self, audio_path):
+        """AST preprocessing: mel -> Image -> ViT input."""
         waveform_np, sr = sf.read(audio_path)
         waveform = torch.from_numpy(waveform_np).float()
 
@@ -60,7 +83,6 @@ class AudioPredictor:
 
         target_samples = self.target_sr * self.max_length
         current_samples = waveform.shape[1]
-
         if current_samples < target_samples:
             padding = target_samples - current_samples
             waveform = F.pad(waveform, (0, padding))

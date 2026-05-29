@@ -12,6 +12,7 @@ def _env_bool(key: str, default: bool = False) -> bool:
 class Config:
     FASTAPI_URL: str = os.getenv("FASTAPI_URL", "http://127.0.0.1:8000")
     CLIENT_NAME: str = os.getenv("CLIENT_NAME", "Hospital-01")
+    CLIENT_ID: str = os.getenv("CLIENT_ID", "1")
     CLIENT_HOST: str = os.getenv("CLIENT_HOST", "127.0.0.1")
     CLIENT_MODALITY: str = os.getenv("CLIENT_MODALITY", "audio")
 
@@ -21,8 +22,13 @@ class Config:
     PREDICTION_THRESHOLD: float = float(os.getenv("PREDICTION_THRESHOLD", "0.5"))
     HEARTBEAT_INTERVAL: int = int(os.getenv("HEARTBEAT_INTERVAL", "30"))
 
+    AUDIO_CHUNK_DURATION: float = float(os.getenv("AUDIO_CHUNK_DURATION", "5"))
+    AUDIO_CHUNK_OVERLAP: float = float(os.getenv("AUDIO_CHUNK_OVERLAP", "0.5"))
+    AUDIO_SEGMENT_THRESHOLD: float = float(os.getenv("AUDIO_SEGMENT_THRESHOLD", "0.5"))
+
     STATE_FILE: str = os.getenv("STATE_FILE", "./client_state.json")
     FL_DATA_DIR: str = os.getenv("FL_DATA_DIR", "./fl_worker/fl_data")
+    FL_SYNC_ENABLED: bool = _env_bool("FL_SYNC_ENABLED", False)
 
     # Multi-label config
     IMAGE_NUM_CLASSES: int = 3

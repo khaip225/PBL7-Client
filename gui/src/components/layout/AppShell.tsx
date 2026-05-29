@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 
-export type Tab = "diagnosis" | "training" | "history";
+export type Tab = "diagnosis" | "training" | "history" | "review";
 
 interface Props {
   activeTab: Tab;
