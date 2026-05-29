@@ -20,11 +20,14 @@ from gui_backend.services.diagnosis_service import DiagnosisService
 from gui_backend.services.training_service import TrainingService
 from gui_backend.services.history_service import HistoryService
 from gui_backend.services.review_service import ReviewService
+from gui_backend.services.retrieval_service import RetrievalService
 from gui_backend.api.health import router as health_router
 from gui_backend.api.diagnosis import router as diagnosis_router
 from gui_backend.api.training import router as training_router
 from gui_backend.api.history import router as history_router
 from gui_backend.api.review import router as review_router
+from gui_backend.api.retrieval import router as retrieval_router
+from gui_backend.api.tsne import router as tsne_router
 from fl_worker.api_client import api_client
 
 AUDIO_MODEL = os.path.join(BASE_DIR, "ai_engines", "current_weights", "best_global_audio.pth")
@@ -51,6 +54,38 @@ async def lifespan(app: FastAPI):
     app.state.training_service = TrainingService()
     app.state.history_service = HistoryService()
     app.state.review_service = ReviewService(app.state.history_service, data_sync_manager)
+
+    # Cross-modal retrieval service (optional prototype model)
+    retrieval_svc = None
+    try:
+        from shared.prototype_fl_model import FLPrototypeModel
+
+        _server_flower = os.path.join(BASE_DIR, "..", "PBL7-Server", "flower_server")
+        _img_ckpt = os.path.join(_server_flower, "pretrained_xray_multilabel.pth")
+        _aud_ckpt = os.path.join(_server_flower, "pretrained_audio_multilabel.pth")
+
+        if os.path.exists(_img_ckpt) and os.path.exists(_aud_ckpt):
+            proto_model = FLPrototypeModel(
+                image_pretrained_path=_img_ckpt,
+                audio_pretrained_path=_aud_ckpt,
+            )
+            retrieval_svc = RetrievalService(
+                audio_predictor, image_predictor, storage_manager,
+                prototype_model=proto_model,
+            )
+            print("[GUI Backend] Retrieval service initialized with prototype model")
+        else:
+            retrieval_svc = RetrievalService(
+                audio_predictor, image_predictor, storage_manager,
+            )
+            print("[GUI Backend] Retrieval service initialized (fallback mode, no prototype model)")
+    except Exception as e:
+        retrieval_svc = RetrievalService(
+            audio_predictor, image_predictor, storage_manager,
+        )
+        print(f"[GUI Backend] Retrieval service initialized (fallback mode): {e}")
+
+    app.state.retrieval_service = retrieval_svc
 
     # Connect to VPS server (register + start heartbeat)
     print("[GUI Backend] Connecting to VPS server...")
@@ -98,6 +133,8 @@ app.include_router(diagnosis_router)
 app.include_router(training_router)
 app.include_router(history_router)
 app.include_router(review_router)
+app.include_router(retrieval_router)
+app.include_router(tsne_router)
 
 
 if __name__ == "__main__":

@@ -40,9 +40,67 @@ def compute_auroc(all_probs, all_labels, num_classes):
         return 0.5, {str(i): 0.5 for i in range(num_classes)}
 
 
+def compute_auprc(all_probs, all_labels, num_classes):
+    """Compute per-class and macro Average Precision (AUPRC)."""
+    try:
+        from sklearn.metrics import average_precision_score
+        per_class = {}
+        for i in range(num_classes):
+            if all_labels[:, i].sum() > 0:
+                per_class[str(i)] = float(average_precision_score(all_labels[:, i], all_probs[:, i]))
+            else:
+                per_class[str(i)] = 0.0
+        macro = float(np.mean(list(per_class.values())))
+        return macro, per_class
+    except ImportError:
+        return 0.0, {str(i): 0.0 for i in range(num_classes)}
+
+
+def compute_f1_precision_recall(all_probs, all_labels, num_classes, threshold=0.5):
+    """Compute F1-macro, precision, recall, and confusion matrix."""
+    try:
+        from sklearn.metrics import f1_score, precision_score, recall_score, confusion_matrix
+        preds = (all_probs >= threshold).astype(int)
+
+        per_class_f1 = {}
+        per_class_precision = {}
+        per_class_recall = {}
+        for i in range(num_classes):
+            per_class_f1[str(i)] = float(f1_score(all_labels[:, i], preds[:, i], zero_division=0))
+            per_class_precision[str(i)] = float(precision_score(all_labels[:, i], preds[:, i], zero_division=0))
+            per_class_recall[str(i)] = float(recall_score(all_labels[:, i], preds[:, i], zero_division=0))
+
+        f1_macro = float(np.mean(list(per_class_f1.values())))
+        precision_macro = float(np.mean(list(per_class_precision.values())))
+        recall_macro = float(np.mean(list(per_class_recall.values())))
+
+        # Confusion matrix for each class
+        cm_per_class = {}
+        for i in range(num_classes):
+            cm = confusion_matrix(all_labels[:, i], preds[:, i])
+            cm_per_class[str(i)] = cm.tolist()
+
+        return {
+            "f1_macro": f1_macro,
+            "precision_macro": precision_macro,
+            "recall_macro": recall_macro,
+            "per_class_f1": per_class_f1,
+            "per_class_precision": per_class_precision,
+            "per_class_recall": per_class_recall,
+            "confusion_matrix": cm_per_class,
+        }
+    except ImportError:
+        return {
+            "f1_macro": 0.0, "precision_macro": 0.0, "recall_macro": 0.0,
+            "per_class_f1": {}, "per_class_precision": {}, "per_class_recall": {},
+            "confusion_matrix": {},
+        }
+
+
 class AdvancedPneumoniaClient(fl.client.NumPyClient):
     def __init__(self, client_id, model, trainloader, valloader, device,
-                 num_classes=1, lr=1e-4, mu=0.001, local_epochs=2):
+                 num_classes=1, lr=1e-4, mu=0.001, local_epochs=2,
+                 log_dir: str | None = None):
         self.client_id = client_id
         self.model = model
         self.trainloader = trainloader
@@ -54,6 +112,18 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
         self.mu = mu
         self.local_epochs = local_epochs
         self.current_round = 0
+
+        # TensorBoard logging
+        self.writer = None
+        if log_dir:
+            try:
+                from torch.utils.tensorboard import SummaryWriter
+                import os
+                os.makedirs(log_dir, exist_ok=True)
+                self.writer = SummaryWriter(log_dir=log_dir)
+                print(f"[TensorBoard] Logging to {log_dir}")
+            except ImportError:
+                print("[TensorBoard] tensorboard not installed, skipping")
 
     def get_parameters(self, config):
         return [val.cpu().numpy() for _, val in self.model.state_dict().items()]
@@ -145,9 +215,14 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
         avg_train_loss = total_train_loss / total_train_samples if total_train_samples > 0 else 0.0
         avg_train_acc = total_train_correct / total_train_samples if total_train_samples > 0 else 0.0
 
-        # Multi-label evaluation: compute per-class AUROC
+        # Multi-label evaluation: compute per-class AUROC + advanced metrics
         val_auroc_macro = None
         per_class_auroc = {}
+        val_auprc_macro = None
+        per_class_auprc = {}
+        val_f1 = None
+        val_precision = None
+        val_recall = None
         val_loss = None
         if self.valloader and len(self.valloader.dataset) > 0:
             self.model.eval()
@@ -170,7 +245,36 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
             all_probs = np.concatenate(all_probs_list, axis=0)
             all_labels_np = np.concatenate(all_labels_list, axis=0)
             val_auroc_macro, per_class_auroc = compute_auroc(all_probs, all_labels_np, self.num_classes)
+            val_auprc_macro, per_class_auprc = compute_auprc(all_probs, all_labels_np, self.num_classes)
+            f1_data = compute_f1_precision_recall(all_probs, all_labels_np, self.num_classes)
+            val_f1 = f1_data["f1_macro"]
+            val_precision = f1_data["precision_macro"]
+            val_recall = f1_data["recall_macro"]
             val_loss = float(total_val_loss / total_val) if total_val > 0 else None
+
+        # TensorBoard logging
+        global_step = self.current_round * self.local_epochs * len(self.trainloader)
+        if self.writer is not None:
+            self.writer.add_scalar("Loss/train", avg_train_loss, self.current_round)
+            self.writer.add_scalar("Accuracy/train", avg_train_acc, self.current_round)
+            if val_loss is not None:
+                self.writer.add_scalar("Loss/val", val_loss, self.current_round)
+            if val_auroc_macro is not None:
+                self.writer.add_scalar("AUROC/macro", val_auroc_macro, self.current_round)
+            if val_auprc_macro is not None:
+                self.writer.add_scalar("AUPRC/macro", val_auprc_macro, self.current_round)
+            if val_f1 is not None:
+                self.writer.add_scalar("F1/macro", val_f1, self.current_round)
+            if val_precision is not None:
+                self.writer.add_scalar("Precision/macro", val_precision, self.current_round)
+            if val_recall is not None:
+                self.writer.add_scalar("Recall/macro", val_recall, self.current_round)
+            # Per-class AUROC
+            for cls_name, val in per_class_auroc.items():
+                self.writer.add_scalar(f"AUROC/class_{cls_name}", val, self.current_round)
+            # Global step-based logging
+            self.writer.add_scalar("Loss/train_step", avg_train_loss, global_step)
+            self.writer.flush()
 
         api_client.update_training_state(
             current_round=self.current_round,
@@ -182,12 +286,21 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
             val_accuracy=val_auroc_macro,
             loss=val_loss if val_loss is not None else avg_train_loss,
             accuracy=val_auroc_macro if val_auroc_macro is not None else avg_train_acc,
+            precision=val_precision,
+            recall=val_recall,
+            f1=val_f1,
+            auc=val_auroc_macro,
             status="evaluating",
         )
         return self.get_parameters(config={}), len(self.trainloader.dataset), {
             "loss": avg_train_loss,
             "auroc_macro": val_auroc_macro,
             "per_class_auroc": per_class_auroc,
+            "auprc_macro": val_auprc_macro,
+            "per_class_auprc": per_class_auprc,
+            "f1_macro": val_f1,
+            "precision_macro": val_precision,
+            "recall_macro": val_recall,
         }
 
     def evaluate(self, parameters, config):
@@ -217,12 +330,18 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
         all_probs = np.concatenate(all_probs_list, axis=0)
         all_labels_np = np.concatenate(all_labels_list, axis=0)
         auroc_macro, per_class_auroc = compute_auroc(all_probs, all_labels_np, self.num_classes)
+        auprc_macro, per_class_auprc = compute_auprc(all_probs, all_labels_np, self.num_classes)
+        f1_data = compute_f1_precision_recall(all_probs, all_labels_np, self.num_classes)
 
         api_client.update_training_state(
             loss=avg_loss,
             accuracy=auroc_macro,
             val_loss=avg_loss,
             val_accuracy=float(auroc_macro),
+            precision=f1_data["precision_macro"],
+            recall=f1_data["recall_macro"],
+            f1=f1_data["f1_macro"],
+            auc=float(auroc_macro),
             current_round=self.current_round,
             status="evaluating",
         )
@@ -230,6 +349,12 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
         return avg_loss, len(self.valloader.dataset), {
             "auroc_macro": float(auroc_macro),
             "per_class_auroc": per_class_auroc,
+            "auprc_macro": float(auprc_macro),
+            "per_class_auprc": per_class_auprc,
+            "f1_macro": f1_data["f1_macro"],
+            "precision_macro": f1_data["precision_macro"],
+            "recall_macro": f1_data["recall_macro"],
+            "confusion_matrix": f1_data["confusion_matrix"],
         }
 
 
@@ -348,6 +473,7 @@ if __name__ == "__main__":
     parser.add_argument("--modality", type=str, choices=["audio", "image", "alignment"], default="audio")
     parser.add_argument("--total_rounds", type=int, default=10)
     parser.add_argument("--total_epochs", type=int, default=2, help="Local epochs per round")
+    parser.add_argument("--log_dir", type=str, default=None, help="TensorBoard log directory")
     args = parser.parse_args()
 
     if args.server_address is None:
@@ -369,8 +495,13 @@ if __name__ == "__main__":
 
     base_dir = _resolve_base_dir()
 
+    # TensorBoard log dir
+    log_dir = args.log_dir
+    if log_dir is None:
+        log_dir = os.path.join(base_dir, "tensorboard", f"client_{args.client_id}_{args.modality}")
+
     if args.modality == "alignment":
-        from prototype_fl_model import FLPrototypeModel
+        from shared.prototype_fl_model import FLPrototypeModel
 
         server_flower = os.path.join(_server_path, 'flower_server')
         prototype_model = FLPrototypeModel(
@@ -398,7 +529,7 @@ if __name__ == "__main__":
         num_classes = 2
         client = AdvancedPneumoniaClient(
             args.client_id, model, trainloader, valloader, device,
-            num_classes=num_classes, local_epochs=args.total_epochs
+            num_classes=num_classes, local_epochs=args.total_epochs, log_dir=log_dir
         ).to_client()
     else:
         model = DenseNet121MultiLabel(num_classes=3)
@@ -407,7 +538,7 @@ if __name__ == "__main__":
         num_classes = 3
         client = AdvancedPneumoniaClient(
             args.client_id, model, trainloader, valloader, device,
-            num_classes=num_classes, local_epochs=args.total_epochs
+            num_classes=num_classes, local_epochs=args.total_epochs, log_dir=log_dir
         ).to_client()
 
     api_client.update_training_state(connected_to_flower=True, status="training")
