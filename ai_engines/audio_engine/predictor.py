@@ -2,8 +2,13 @@ import torch
 import torchaudio
 import torch.nn.functional as F
 import soundfile as sf
+import numpy as np
+from PIL import Image
 
 from config import config
+
+
+ACOUSTIC_CLASS_NAMES = ["Crackle", "Wheeze"]
 
 
 class AudioPredictor:
@@ -12,13 +17,13 @@ class AudioPredictor:
         self.model_path = model_path
         self.threshold = threshold if threshold is not None else config.PREDICTION_THRESHOLD
 
-        from ai_engines.audio_engine.cnn14_model import CNN14
-        self.model = CNN14().to(self.device)
+        from ai_engines.audio_engine.ast_model import ASTMultiLabel
+        self.model = ASTMultiLabel(num_classes=2).to(self.device)
         self._load_model()
 
         self.target_sr = 16000
         self.max_length = 15
-        self.n_mels = 64
+        self.n_mels = 128
 
         self.mel_spectrogram = torchaudio.transforms.MelSpectrogram(
             sample_rate=self.target_sr, n_fft=1024, hop_length=512, n_mels=self.n_mels
@@ -69,23 +74,55 @@ class AudioPredictor:
         std = mel_spec_db.std()
         mel_spec_db = (mel_spec_db - mean) / (std + 1e-6)
 
-        return mel_spec_db.unsqueeze(0).to(self.device)
+        mel_np = mel_spec_db.squeeze(0).numpy()
+        mel_img = Image.fromarray(
+            ((mel_np - mel_np.min()) / (mel_np.max() - mel_np.min() + 1e-8) * 255).astype(np.uint8)
+        ).convert("RGB")
+        mel_img = mel_img.resize((224, 224), Image.BICUBIC)
+
+        from torchvision import transforms
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ])
+        return transform(mel_img).unsqueeze(0).to(self.device)
 
     def predict(self, audio_path):
+        """Tra ve multi-label acoustic probabilities."""
         self.model.eval()
         with torch.no_grad():
-            mel = self.preprocess(audio_path)
-            output = self.model(mel)
-            prob = torch.sigmoid(output).item()
-            return prob
+            tensor = self.preprocess(audio_path)
+            logits = self.model(tensor)
+            probs = torch.sigmoid(logits).squeeze(0)
+        return {
+            "Crackle": round(probs[0].item(), 4),
+            "Wheeze": round(probs[1].item(), 4),
+        }
 
     def predict_with_label(self, audio_path):
-        prob = self.predict(audio_path)
-        label = "Abnormal" if prob >= self.threshold else "Normal"
-        confidence = prob if prob >= self.threshold else (1 - prob)
+        probs = self.predict(audio_path)
+        crackle_p = probs["Crackle"]
+        wheeze_p = probs["Wheeze"]
+        binary_score = max(crackle_p, wheeze_p)
+
+        detected = binary_score >= self.threshold
+        if detected:
+            if crackle_p >= self.threshold and wheeze_p >= self.threshold:
+                label = "Crackle + Wheeze"
+            elif crackle_p >= self.threshold:
+                label = "Crackle"
+            else:
+                label = "Wheeze"
+        else:
+            label = "Normal"
+
         return {
-            "probability": prob,
+            "probabilities": probs,
+            "crackle_prob": crackle_p,
+            "wheeze_prob": wheeze_p,
+            "binary_score": binary_score,
             "label": label,
-            "confidence": round(confidence * 100, 1),
+            "confidence": round(binary_score * 100, 1) if detected else round((1 - binary_score) * 100, 1),
             "threshold": self.threshold,
+            "detected": detected,
         }

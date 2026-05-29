@@ -5,7 +5,8 @@ interface Props {
 }
 
 export default function ConfidenceGauge({ value, threshold, size = 160 }: Props) {
-  const pct = Math.min(value * 100, 100);
+  // value is already in percentage (0-100)
+  const pct = Math.min(value, 100);
   const radius = size * 0.35;
   const strokeW = size * 0.08;
   const cx = size / 2;

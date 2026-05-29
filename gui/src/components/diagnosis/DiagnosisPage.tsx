@@ -121,7 +121,7 @@ export default function DiagnosisPage() {
       )}
 
       {d.result && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-6">
           <ConfidenceGauge
             value={d.result.result.confidence}
             threshold={d.result.result.threshold}

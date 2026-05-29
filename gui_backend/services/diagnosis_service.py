@@ -1,8 +1,5 @@
 import os
-import shutil
-import tempfile
 from datetime import datetime
-
 from config import config
 
 
@@ -16,37 +13,55 @@ class DiagnosisService:
 
     def run(self, mode: str, audio_file_path: str | None, image_file_path: str | None) -> dict:
         timestamp = datetime.now()
+        heatmap_path = None
 
         if mode == "fusion":
             if not audio_file_path or not image_file_path:
                 raise ValueError("Fusion mode requires both audio and image files")
-            audio_score = self.audio_predictor.predict(audio_file_path)
-            image_score = self.image_predictor.predict(image_file_path)
-            final_score = self.fusion_engine.fuse(audio_score, image_score)
-            scores = {"audio_score": audio_score, "image_score": image_score, "fusion_score": final_score}
+            audio_result = self.audio_predictor.predict_with_label(audio_file_path)
+            image_result = self.image_predictor.predict_with_gradcam(image_file_path)
+            fusion_scores = self.fusion_engine.fuse(
+                audio_result["probabilities"], image_result["probabilities"]
+            )
+            primary_disease, confidence = self.fusion_engine.get_primary_disease(fusion_scores)
+            scores = {
+                "audio_scores": audio_result["probabilities"],
+                "image_scores": image_result["probabilities"],
+                "fusion_scores": fusion_scores,
+            }
+            heatmap_path = image_result.get("heatmap_path")
+            label = primary_disease
+            conf_pct = round(confidence * 100, 1)
+
         elif mode == "audio":
             if not audio_file_path:
                 raise ValueError("Audio mode requires an audio file")
-            audio_score = self.audio_predictor.predict(audio_file_path)
-            final_score = audio_score
-            scores = {"audio_score": audio_score, "image_score": None, "fusion_score": None}
+            audio_result = self.audio_predictor.predict_with_label(audio_file_path)
+            scores = {
+                "audio_scores": audio_result["probabilities"],
+                "image_scores": None,
+                "fusion_scores": None,
+            }
+            label = audio_result["label"]
+            conf_pct = audio_result["confidence"]
+
         elif mode == "image":
             if not image_file_path:
                 raise ValueError("Image mode requires an image file")
-            # Dùng predict_with_gradcam để có cả score + heatmap
             heatmap_dir = os.path.join(self.storage_manager.client_dir, "heatmaps")
-            result = self.image_predictor.predict_with_gradcam(
+            image_result = self.image_predictor.predict_with_gradcam(
                 image_file_path, save_dir=heatmap_dir
             )
-            image_score = result["prob"]
-            final_score = image_score
-            scores = {"audio_score": None, "image_score": image_score, "fusion_score": None}
-            heatmap_path = result.get("heatmap_path")
+            scores = {
+                "audio_scores": None,
+                "image_scores": image_result["probabilities"],
+                "fusion_scores": None,
+            }
+            heatmap_path = image_result.get("heatmap_path")
+            label = image_result["best_class"] if image_result["detected"] else "Normal"
+            conf_pct = round(image_result["best_probability"] * 100, 1)
         else:
             raise ValueError(f"Unknown mode: {mode}")
-
-        label = "Abnormal" if final_score > self.threshold else "Normal"
-        confidence = (final_score * 100) if label == "Abnormal" else ((1 - final_score) * 100)
 
         audio_dest, image_dest = self.storage_manager.save_files(
             audio_file_path, image_file_path, label
@@ -56,18 +71,18 @@ class DiagnosisService:
             "mode": mode,
             "result": {
                 "label": label,
-                "confidence": round(confidence, 1),
+                "confidence": conf_pct,
                 "threshold": self.threshold,
             },
             "scores": {
-                "audio_score": round(scores["audio_score"], 6) if scores["audio_score"] is not None else None,
-                "image_score": round(scores["image_score"], 6) if scores["image_score"] is not None else None,
-                "fusion_score": round(scores["fusion_score"], 6) if scores["fusion_score"] is not None else None,
+                "audio_scores": scores["audio_scores"],
+                "image_scores": scores["image_scores"],
+                "fusion_scores": scores["fusion_scores"],
             },
             "saved": {
                 "audio_dest": audio_dest,
                 "image_dest": image_dest,
             },
-            "heatmap_path": heatmap_path if mode == "image" else None,
+            "heatmap_path": heatmap_path,
             "timestamp": timestamp.isoformat(),
         }

@@ -13,7 +13,7 @@ if BASE_DIR not in sys.path:
 from config import config
 from ai_engines.audio_engine.predictor import AudioPredictor
 from ai_engines.image_engine.predictor import ImagePredictor
-from ai_engines.fusion import LateFusion
+from ai_engines.fusion import OntologyFusion
 from local_managers.storage_manager import StorageManager
 from gui_backend.services.diagnosis_service import DiagnosisService
 from gui_backend.services.training_service import TrainingService
@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
 
     audio_predictor = AudioPredictor(AUDIO_MODEL, threshold=config.PREDICTION_THRESHOLD)
     image_predictor = ImagePredictor(IMAGE_MODEL)
-    fusion_engine = LateFusion(audio_weight=0.6, image_weight=0.4)
+    fusion_engine = OntologyFusion(audio_weight=0.4)
     storage_manager = StorageManager(client_id=1)
 
     app.state.diagnosis_service = DiagnosisService(

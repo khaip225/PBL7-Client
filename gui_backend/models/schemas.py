@@ -14,9 +14,9 @@ class DiagnosisRequest(BaseModel):
 
 
 class ScoreDetail(BaseModel):
-    audio_score: float | None = None
-    image_score: float | None = None
-    fusion_score: float | None = None
+    audio_scores: dict | None = None    # {"Crackle": 0.7, "Wheeze": 0.1}
+    image_scores: dict | None = None    # {"Pneumonia": 0.8, "COPD_Emphysema": 0.1, "Fibrosis": 0.05}
+    fusion_scores: dict | None = None   # {"Pneumonia": 0.8, "COPD_Emphysema": 0.1, "Fibrosis": 0.05, "Normal": 0.2}
 
 
 class DiagnosisResult(BaseModel):
