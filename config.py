@@ -30,5 +30,12 @@ class Config:
     FL_DATA_DIR: str = os.getenv("FL_DATA_DIR", "./fl_worker/fl_data")
     FL_SYNC_ENABLED: bool = _env_bool("FL_SYNC_ENABLED", False)
 
+    # Multi-label config
+    IMAGE_NUM_CLASSES: int = 3
+    IMAGE_CLASS_NAMES: list = ["Pneumonia", "COPD_Emphysema", "Fibrosis"]
+    AUDIO_NUM_CLASSES: int = 2
+    AUDIO_CLASS_NAMES: list = ["Crackle", "Wheeze"]
+    N_MELS: int = 128
+
 
 config = Config()

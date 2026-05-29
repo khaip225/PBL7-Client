@@ -2,7 +2,7 @@ interface Props {
   label: string;
   value: number;
   max?: number;
-  color?: "blue" | "green" | "red" | "yellow";
+  color?: "blue" | "green" | "red" | "yellow" | "gray";
 }
 
 const colorMap = {
@@ -10,6 +10,7 @@ const colorMap = {
   green: "bg-green-500",
   red: "bg-red-500",
   yellow: "bg-yellow-500",
+  gray: "bg-gray-500",
 };
 
 export default function MetricBar({ label, value, max = 100, color = "blue" }: Props) {

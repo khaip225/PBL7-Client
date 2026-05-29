@@ -32,3 +32,16 @@ async def get_history_audio(record_id: str, request: Request):
     if not path or not os.path.exists(path):
         raise HTTPException(404, "Audio not found")
     return FileResponse(path, media_type="audio/wav")
+
+
+@router.get("/api/heatmap")
+async def get_heatmap(path: str, request: Request):
+    """Serve heatmap image. Chi chap nhan path nam trong Local_Data."""
+    if not path or not os.path.exists(path):
+        raise HTTPException(404, "Heatmap not found")
+    # Chi cho phep truy cap file trong thu muc Local_Data
+    allowed_base = os.path.abspath("./Local_Data")
+    target = os.path.abspath(path)
+    if not target.startswith(allowed_base):
+        raise HTTPException(403, "Access denied")
+    return FileResponse(path, media_type="image/png")

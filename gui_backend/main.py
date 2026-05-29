@@ -13,7 +13,7 @@ if BASE_DIR not in sys.path:
 from config import config
 from ai_engines.audio_engine.predictor import AudioPredictor
 from ai_engines.image_engine.predictor import ImagePredictor
-from ai_engines.fusion import LateFusion
+from ai_engines.fusion import OntologyFusion
 from local_managers.storage_manager import StorageManager
 from local_managers.data_sync_manager import DataSyncManager
 from gui_backend.services.diagnosis_service import DiagnosisService
@@ -25,6 +25,7 @@ from gui_backend.api.diagnosis import router as diagnosis_router
 from gui_backend.api.training import router as training_router
 from gui_backend.api.history import router as history_router
 from gui_backend.api.review import router as review_router
+from fl_worker.api_client import api_client
 
 AUDIO_MODEL = os.path.join(BASE_DIR, "ai_engines", "current_weights", "best_global_audio.pth")
 IMAGE_MODEL = os.path.join(BASE_DIR, "ai_engines", "current_weights", "best_global_image.pth")
@@ -40,7 +41,7 @@ async def lifespan(app: FastAPI):
 
     audio_predictor = AudioPredictor(AUDIO_MODEL, threshold=config.PREDICTION_THRESHOLD)
     image_predictor = ImagePredictor(IMAGE_MODEL)
-    fusion_engine = LateFusion(audio_weight=0.6, image_weight=0.4)
+    fusion_engine = OntologyFusion(audio_weight=0.4)
     storage_manager = StorageManager(client_id=config.CLIENT_ID)
     data_sync_manager = DataSyncManager(client_id=config.CLIENT_ID)
 
@@ -51,6 +52,19 @@ async def lifespan(app: FastAPI):
     app.state.history_service = HistoryService()
     app.state.review_service = ReviewService(app.state.history_service, data_sync_manager)
 
+    # Connect to VPS server (register + start heartbeat)
+    print("[GUI Backend] Connecting to VPS server...")
+    try:
+        client_uuid = api_client.register()
+        if client_uuid:
+            app.state.client_id = str(client_uuid)
+            api_client.start_heartbeat()
+            print(f"[GUI Backend] Connected to VPS as {client_uuid}")
+        else:
+            print("[GUI Backend] WARNING: Could not register with VPS — continuing offline")
+    except Exception as e:
+        print(f"[GUI Backend] WARNING: VPS connection failed: {e}")
+
     print("[GUI Backend] Ready.")
     yield
 
@@ -60,6 +74,13 @@ async def lifespan(app: FastAPI):
             app.state.training_service.stop()
         except Exception:
             pass
+
+    # Notify VPS that we're going offline
+    try:
+        api_client.shutdown()
+        print("[GUI Backend] Sent offline notification to VPS")
+    except Exception as e:
+        print(f"[GUI Backend] WARNING: Failed to send offline: {e}")
 
 
 app = FastAPI(title="PBL7 Client GUI Backend", lifespan=lifespan)

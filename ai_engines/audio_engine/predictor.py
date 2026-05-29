@@ -3,8 +3,12 @@ import torchaudio
 import torch.nn.functional as F
 import numpy as np
 import soundfile as sf
+from PIL import Image
 
 from config import config
+
+
+ACOUSTIC_CLASS_NAMES = ["Crackle", "Wheeze"]
 
 
 class AudioPredictor:
@@ -13,14 +17,15 @@ class AudioPredictor:
         self.model_path = model_path
         self.threshold = threshold if threshold is not None else config.PREDICTION_THRESHOLD
 
-        from ai_engines.audio_engine.cnn14_model import CNN14
-        self.model = CNN14().to(self.device)
+        from ai_engines.audio_engine.ast_model import ASTMultiLabel
+        self.model = ASTMultiLabel(num_classes=2).to(self.device)
         self._load_model()
 
         self.target_sr = 16000
-        self.chunk_duration = config.AUDIO_CHUNK_DURATION
-        self.overlap = config.AUDIO_CHUNK_OVERLAP
-        self.n_mels = 64
+        self.chunk_duration = config.AUDIO_CHUNK_DURATION if hasattr(config, 'AUDIO_CHUNK_DURATION') else 15
+        self.overlap = config.AUDIO_CHUNK_OVERLAP if hasattr(config, 'AUDIO_CHUNK_OVERLAP') else 0.0
+        self.max_length = 15
+        self.n_mels = 128
 
         self.mel_spectrogram = torchaudio.transforms.MelSpectrogram(
             sample_rate=self.target_sr, n_fft=1024, hop_length=512, n_mels=self.n_mels
@@ -59,90 +64,87 @@ class AudioPredictor:
 
         return waveform
 
-    def _segment_waveform(self, waveform: torch.Tensor) -> torch.Tensor:
-        chunk_samples = int(self.target_sr * self.chunk_duration)
-        hop_samples = int(chunk_samples * (1 - self.overlap))
-        total_samples = waveform.shape[1]
+    def preprocess(self, audio_path):
+        """AST preprocessing: mel -> Image -> ViT input."""
+        waveform_np, sr = sf.read(audio_path)
+        waveform = torch.from_numpy(waveform_np).float()
 
-        chunks = []
-        for start_idx in range(0, total_samples, hop_samples):
-            end_idx = start_idx + chunk_samples
-            chunk = waveform[:, start_idx:end_idx]
+        if waveform.ndim == 1:
+            waveform = waveform.unsqueeze(0)
+        elif waveform.ndim == 2:
+            waveform = waveform.transpose(0, 1)
 
-            if chunk.shape[1] < chunk_samples:
-                padding = chunk_samples - chunk.shape[1]
-                chunk = F.pad(chunk, (0, padding))
+        if waveform.shape[0] > 1:
+            waveform = torch.mean(waveform, dim=0, keepdim=True)
 
-            chunks.append(chunk)
+        if sr != self.target_sr:
+            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.target_sr)
+            waveform = resampler(waveform)
 
-            if end_idx >= total_samples:
-                break
+        target_samples = self.target_sr * self.max_length
+        current_samples = waveform.shape[1]
+        if current_samples < target_samples:
+            padding = target_samples - current_samples
+            waveform = F.pad(waveform, (0, padding))
+        elif current_samples > target_samples:
+            waveform = waveform[:, :target_samples]
 
-        return torch.stack(chunks).to(self.device)
-
-    def _preprocess_chunks(self, chunks: torch.Tensor) -> torch.Tensor:
-        mel_spec = self.mel_spectrogram(chunks)
+        mel_spec = self.mel_spectrogram(waveform)
         mel_spec_db = self.amplitude_to_db(mel_spec)
 
-        mean = mel_spec_db.mean(dim=[1, 2, 3], keepdim=True)
-        std = mel_spec_db.std(dim=[1, 2, 3], keepdim=True)
-        mel_spec_norm = (mel_spec_db - mean) / (std + 1e-6)
+        mean = mel_spec_db.mean()
+        std = mel_spec_db.std()
+        mel_spec_db = (mel_spec_db - mean) / (std + 1e-6)
 
-        return mel_spec_norm
+        mel_np = mel_spec_db.squeeze(0).numpy()
+        mel_img = Image.fromarray(
+            ((mel_np - mel_np.min()) / (mel_np.max() - mel_np.min() + 1e-8) * 255).astype(np.uint8)
+        ).convert("RGB")
+        mel_img = mel_img.resize((224, 224), Image.BICUBIC)
+
+        from torchvision import transforms
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ])
+        return transform(mel_img).unsqueeze(0).to(self.device)
 
     def predict(self, audio_path):
-        return self.predict_segments(audio_path)["final_score"]
-
-    def predict_segments(self, audio_path):
+        """Tra ve multi-label acoustic probabilities."""
         self.model.eval()
-        waveform = self._load_audio(audio_path)
-        chunks = self._segment_waveform(waveform)
-        mel = self._preprocess_chunks(chunks)
-
         with torch.no_grad():
-            outputs = self.model(mel)
-            probs = torch.sigmoid(outputs).squeeze(-1)
-
-        probs_np = probs.detach().cpu().numpy()
-
-        hop = self.chunk_duration * (1 - self.overlap)
-        segments = []
-        for idx, score in enumerate(probs_np):
-            start = idx * hop
-            end = start + self.chunk_duration
-            segments.append({
-                "index": int(idx),
-                "start": float(start),
-                "end": float(end),
-                "score": float(score),
-            })
-
-        max_score = float(np.max(probs_np))
-        avg_score = float(np.mean(probs_np))
-        abnormal_chunks = np.sum(probs_np > self.threshold)
-        abnormal_ratio = float(abnormal_chunks / len(probs_np))
-
-        final_score = (max_score * 0.7) + (avg_score * 0.3)
-
+            tensor = self.preprocess(audio_path)
+            logits = self.model(tensor)
+            probs = torch.sigmoid(logits).squeeze(0)
         return {
-            "final_score": final_score,
-            "max_score": max_score,
-            "avg_score": avg_score,
-            "abnormal_chunks_ratio": abnormal_ratio,
-            "total_chunks_analyzed": len(probs_np),
-            "chunk_duration": self.chunk_duration,
-            "overlap": self.overlap,
-            "threshold": self.threshold,
-            "segments": segments,
+            "Crackle": round(probs[0].item(), 4),
+            "Wheeze": round(probs[1].item(), 4),
         }
 
     def predict_with_label(self, audio_path):
-        prob = self.predict(audio_path)
-        label = "Abnormal" if prob >= self.threshold else "Normal"
-        confidence = prob if prob >= self.threshold else (1 - prob)
+        probs = self.predict(audio_path)
+        crackle_p = probs["Crackle"]
+        wheeze_p = probs["Wheeze"]
+        binary_score = max(crackle_p, wheeze_p)
+
+        detected = binary_score >= self.threshold
+        if detected:
+            if crackle_p >= self.threshold and wheeze_p >= self.threshold:
+                label = "Crackle + Wheeze"
+            elif crackle_p >= self.threshold:
+                label = "Crackle"
+            else:
+                label = "Wheeze"
+        else:
+            label = "Normal"
+
         return {
-            "probability": prob,
+            "probabilities": probs,
+            "crackle_prob": crackle_p,
+            "wheeze_prob": wheeze_p,
+            "binary_score": binary_score,
             "label": label,
-            "confidence": round(confidence * 100, 1),
+            "confidence": round(binary_score * 100, 1) if detected else round((1 - binary_score) * 100, 1),
             "threshold": self.threshold,
+            "detected": detected,
         }

@@ -8,56 +8,47 @@ from dataset_loader import load_client_data, load_client_data_image
 import copy
 import sys
 import os
-import atexit
+import numpy as np
 from tqdm import tqdm
 import json
 from pathlib import Path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from ai_engines.audio_engine.cnn14_model import CNN14, freeze_model_blocks
-from ai_engines.image_engine.resnet18_model import ResNet18, freeze_model_blocks as freeze_image_blocks
+
+# Add PBL7-Server path for shared modules
+_server_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'PBL7-Server'))
+if os.path.exists(_server_path) and _server_path not in sys.path:
+    sys.path.insert(0, _server_path)
+
+from ai_engines.audio_engine.ast_model import ASTMultiLabel, freeze_early_blocks
+from ai_engines.image_engine.densenet121_model import DenseNet121MultiLabel, freeze_backbone
 from fl_worker.api_client import api_client
 
 
-def _safe_div(numer: float, denom: float) -> float:
-    return float(numer / denom) if denom else 0.0
-
-
-def _compute_binary_metrics(probabilities: list[float], labels: list[int]) -> dict:
-    preds = [1 if p >= 0.5 else 0 for p in probabilities]
-    tp = sum(1 for p, y in zip(preds, labels) if p == 1 and y == 1)
-    fp = sum(1 for p, y in zip(preds, labels) if p == 1 and y == 0)
-    fn = sum(1 for p, y in zip(preds, labels) if p == 0 and y == 1)
-    tn = sum(1 for p, y in zip(preds, labels) if p == 0 and y == 0)
-
-    precision = _safe_div(tp, tp + fp)
-    recall = _safe_div(tp, tp + fn)
-    f1 = _safe_div(2 * precision * recall, precision + recall)
-
-    auc = None
+def compute_auroc(all_probs, all_labels, num_classes):
+    """Compute per-class and macro AUROC."""
     try:
         from sklearn.metrics import roc_auc_score
-
-        if len(set(labels)) > 1:
-            auc = float(roc_auc_score(labels, probabilities))
-    except Exception:
-        auc = None
-
-    return {
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "auc": auc,
-        "confusion": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
-    }
+        per_class = {}
+        for i in range(num_classes):
+            if all_labels[:, i].sum() > 0 and (all_labels[:, i].sum() < len(all_labels)):
+                per_class[str(i)] = float(roc_auc_score(all_labels[:, i], all_probs[:, i]))
+            else:
+                per_class[str(i)] = 0.5
+        macro = float(np.mean(list(per_class.values())))
+        return macro, per_class
+    except ImportError:
+        return 0.5, {str(i): 0.5 for i in range(num_classes)}
 
 
 class AdvancedPneumoniaClient(fl.client.NumPyClient):
-    def __init__(self, client_id, model, trainloader, valloader, device, lr=1e-4, mu=0.001, local_epochs=2):
+    def __init__(self, client_id, model, trainloader, valloader, device,
+                 num_classes=1, lr=1e-4, mu=0.001, local_epochs=2):
         self.client_id = client_id
         self.model = model
         self.trainloader = trainloader
         self.valloader = valloader
         self.device = device
+        self.num_classes = num_classes
         self.criterion = nn.BCEWithLogitsLoss()
         self.lr = lr
         self.mu = mu
@@ -82,7 +73,10 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
         for param in global_model.parameters():
             param.requires_grad = False
 
-        optimizer = optim.AdamW(filter(lambda p: p.requires_grad, self.model.parameters()), lr=self.lr, weight_decay=1e-4)
+        optimizer = optim.AdamW(
+            filter(lambda p: p.requires_grad, self.model.parameters()),
+            lr=self.lr, weight_decay=1e-4
+        )
 
         local_epochs = self.local_epochs
         total_steps = len(self.trainloader) * local_epochs
@@ -108,7 +102,7 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
 
             for inputs, labels in progress_bar:
                 inputs = inputs.to(self.device)
-                labels = labels.float().unsqueeze(1).to(self.device)
+                labels = labels.float().to(self.device)
 
                 optimizer.zero_grad()
                 outputs = self.model(inputs)
@@ -151,39 +145,32 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
         avg_train_loss = total_train_loss / total_train_samples if total_train_samples > 0 else 0.0
         avg_train_acc = total_train_correct / total_train_samples if total_train_samples > 0 else 0.0
 
-        # Quick evaluation after training for accuracy metric
-        val_accuracy = None
+        # Multi-label evaluation: compute per-class AUROC
+        val_auroc_macro = None
+        per_class_auroc = {}
         val_loss = None
-        precision = None
-        recall = None
-        f1 = None
-        auc = None
         if self.valloader and len(self.valloader.dataset) > 0:
             self.model.eval()
-            total_correct, total_val = 0, 0
+            all_probs_list = []
+            all_labels_list = []
             total_val_loss = 0.0
-            all_probs = []
-            all_labels = []
+            total_val = 0
             with torch.no_grad():
                 for inputs, labels in self.valloader:
                     inputs = inputs.to(self.device)
-                    labels = labels.float().unsqueeze(1).to(self.device)
+                    labels = labels.float().to(self.device)
                     outputs = self.model(inputs)
                     loss = self.criterion(outputs, labels)
                     total_val_loss += loss.item() * inputs.size(0)
-                    probs = torch.sigmoid(outputs)
-                    preds = (probs >= 0.5).float()
-                    total_correct += (preds == labels).sum().item()
                     total_val += labels.size(0)
-                    all_probs.extend(probs.squeeze(1).detach().cpu().tolist())
-                    all_labels.extend(labels.squeeze(1).detach().cpu().int().tolist())
-            val_accuracy = float(total_correct / total_val) if total_val > 0 else None
+                    probs = torch.sigmoid(outputs)
+                    all_probs_list.append(probs.cpu().numpy())
+                    all_labels_list.append(labels.cpu().numpy())
+
+            all_probs = np.concatenate(all_probs_list, axis=0)
+            all_labels_np = np.concatenate(all_labels_list, axis=0)
+            val_auroc_macro, per_class_auroc = compute_auroc(all_probs, all_labels_np, self.num_classes)
             val_loss = float(total_val_loss / total_val) if total_val > 0 else None
-            metrics = _compute_binary_metrics(all_probs, all_labels)
-            precision = metrics.get("precision")
-            recall = metrics.get("recall")
-            f1 = metrics.get("f1")
-            auc = metrics.get("auc")
 
         api_client.update_training_state(
             current_round=self.current_round,
@@ -192,95 +179,153 @@ class AdvancedPneumoniaClient(fl.client.NumPyClient):
             train_loss=avg_train_loss,
             train_accuracy=avg_train_acc,
             val_loss=val_loss,
-            val_accuracy=val_accuracy,
-            precision=precision,
-            recall=recall,
-            f1=f1,
-            auc=auc,
+            val_accuracy=val_auroc_macro,
             loss=val_loss if val_loss is not None else avg_train_loss,
-            accuracy=val_accuracy if val_accuracy is not None else avg_train_acc,
+            accuracy=val_auroc_macro if val_auroc_macro is not None else avg_train_acc,
             status="evaluating",
         )
-        return self.get_parameters(config={}), len(self.trainloader.dataset), {"loss": avg_train_loss, "accuracy": val_accuracy}
+        return self.get_parameters(config={}), len(self.trainloader.dataset), {
+            "loss": avg_train_loss,
+            "auroc_macro": val_auroc_macro,
+            "per_class_auroc": per_class_auroc,
+        }
 
     def evaluate(self, parameters, config):
         self.set_parameters(parameters)
         self.model.eval()
         total_loss = 0.0
-        total_correct = 0
         total_samples = 0
-        all_probs = []
-        all_labels = []
+        all_probs_list = []
+        all_labels_list = []
 
         with torch.no_grad():
             for inputs, labels in self.valloader:
                 inputs = inputs.to(self.device)
-                labels = labels.float().unsqueeze(1).to(self.device)
+                labels = labels.float().to(self.device)
 
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, labels)
                 total_loss += loss.item() * inputs.size(0)
 
                 probs = torch.sigmoid(outputs)
-                preds = (probs >= 0.5).float()
-                total_correct += (preds == labels).sum().item()
+                all_probs_list.append(probs.cpu().numpy())
+                all_labels_list.append(labels.cpu().numpy())
                 total_samples += labels.size(0)
-                all_probs.extend(probs.squeeze(1).detach().cpu().tolist())
-                all_labels.extend(labels.squeeze(1).detach().cpu().int().tolist())
 
-        accuracy = total_correct / total_samples
         avg_loss = float(total_loss / total_samples)
 
-        metrics = _compute_binary_metrics(all_probs, all_labels)
+        all_probs = np.concatenate(all_probs_list, axis=0)
+        all_labels_np = np.concatenate(all_labels_list, axis=0)
+        auroc_macro, per_class_auroc = compute_auroc(all_probs, all_labels_np, self.num_classes)
 
         api_client.update_training_state(
             loss=avg_loss,
-            accuracy=float(accuracy),
+            accuracy=auroc_macro,
             val_loss=avg_loss,
-            val_accuracy=float(accuracy),
-            precision=metrics.get("precision"),
-            recall=metrics.get("recall"),
-            f1=metrics.get("f1"),
-            auc=metrics.get("auc"),
+            val_accuracy=float(auroc_macro),
             current_round=self.current_round,
             status="evaluating",
         )
 
-        return avg_loss, len(self.valloader.dataset), {"accuracy": float(accuracy)}
+        return avg_loss, len(self.valloader.dataset), {
+            "auroc_macro": float(auroc_macro),
+            "per_class_auroc": per_class_auroc,
+        }
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--client_id", type=int, required=True)
-    parser.add_argument("--server_address", type=str, default=None)
-    parser.add_argument("--modality", type=str, choices=["audio", "image"], default="audio")
-    parser.add_argument("--total_rounds", type=int, default=10, help="Expected total rounds (for dashboard progress)")
-    parser.add_argument("--total_epochs", type=int, default=2, help="Local epochs per round")
-    args = parser.parse_args()
+class PrototypeAlignmentClient(fl.client.NumPyClient):
+    """FL client for prototype-only alignment training."""
 
-    if args.server_address is None:
-        port = 8080 if args.modality == "audio" else 8081
-        args.server_address = f"127.0.0.1:{port}"
+    def __init__(self, client_id, prototype_model, image_loader, audio_loader, device, lr=1e-4):
+        self.client_id = client_id
+        self.prototype_model = prototype_model
+        self.image_loader = image_loader
+        self.audio_loader = audio_loader
+        self.device = device
+        self.lr = lr
+        self.current_round = 0
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Khoi dong Client {args.client_id} ({args.modality.upper()}) tren {device}...")
+        from shared.prototypes import (
+            supervised_contrastive_loss, prototype_consistency_loss,
+            ontology_regularization_loss, EmbeddingMemoryBank,
+        )
+        self.sc_loss = supervised_contrastive_loss
+        self.pc_loss = prototype_consistency_loss
+        self.or_loss = ontology_regularization_loss
+        self.memory_bank = EmbeddingMemoryBank(dim=256, queue_size=512)
 
-    # ---- FastAPI registration (idempotent by client_name) ----
-    client_uuid = api_client.register(task_type=args.modality)
-    if client_uuid:
-        print(f"Registered with FastAPI: {client_uuid}")
-    api_client.update_training_state(
-        modality=args.modality,
-        total_rounds=args.total_rounds,
-        total_epochs=args.total_epochs,
-        connected_to_flower=False,
-    )
+    def get_parameters(self, config):
+        sd = self.prototype_model.shareable_state_dict()
+        return [v.cpu().numpy() for v in sd.values()]
 
-    # ---- Start heartbeat ----
-    api_client.start_heartbeat()
-    atexit.register(api_client.shutdown)
+    def set_parameters(self, parameters):
+        keys = list(self.prototype_model.shareable_state_dict().keys())
+        sd = {k: torch.tensor(v) for k, v in zip(keys, parameters)}
+        self.prototype_model.load_shareable_state_dict(sd)
 
-    # ---- Load model + data ----
+    def fit(self, parameters, config):
+        self.set_parameters(parameters)
+        self.prototype_model.train()
+        self.current_round += 1
+
+        optimizer = optim.AdamW(
+            self.prototype_model.shareable_parameters(), lr=self.lr, weight_decay=1e-4
+        )
+        temperature = 0.07
+
+        total_loss = 0.0
+        n_batches = 0
+
+        for (img_batch, img_labels), (aud_batch, aud_labels) in zip(
+            self.image_loader, self.audio_loader
+        ):
+            img_batch = img_batch.to(self.device)
+            img_labels = img_labels.float().to(self.device)
+            aud_batch = aud_batch.to(self.device)
+            aud_labels = aud_labels.float().to(self.device)
+
+            optimizer.zero_grad()
+
+            img_emb, aud_emb = self.prototype_model.get_embeddings(img_batch, aud_batch)
+            disease_protos = self.prototype_model.disease_protos()
+            acoustic_protos = self.prototype_model.acoustic_protos()
+
+            loss_img = self.sc_loss(img_emb, img_labels, disease_protos, temperature)
+            loss_aud = self.sc_loss(aud_emb, aud_labels, acoustic_protos, temperature)
+            loss_proto = self.pc_loss(disease_protos, acoustic_protos)
+            loss_onto = self.or_loss(disease_protos, acoustic_protos)
+
+            total = loss_img + loss_aud + 0.3 * loss_proto + 0.2 * loss_onto
+            total.backward()
+            optimizer.step()
+
+            self.memory_bank.enqueue_image(img_emb, img_labels)
+            self.memory_bank.enqueue_audio(aud_emb, aud_labels)
+
+            total_loss += total.item()
+            n_batches += 1
+
+        avg_loss = total_loss / max(n_batches, 1)
+
+        api_client.update_training_state(
+            current_round=self.current_round,
+            loss=avg_loss,
+        )
+        return self.get_parameters(config={}), n_batches, {
+            "loss": avg_loss,
+            "loss_img": loss_img.item(),
+            "loss_aud": loss_aud.item(),
+            "loss_proto": loss_proto.item(),
+            "loss_onto": loss_onto.item(),
+        }
+
+    def evaluate(self, parameters, config):
+        self.set_parameters(parameters)
+        return 0.0, 1, {"loss": 0.0}
+
+
+def _resolve_base_dir() -> str:
+    """Resolve FL data directory based on current batch from fl_state.json."""
     state_path = Path(__file__).resolve().parent.parent / "local_managers" / "fl_state.json"
     if state_path.exists():
         try:
@@ -288,17 +333,60 @@ if __name__ == "__main__":
                 state = json.load(f)
             current_batch = int(state.get("current_batch", 1))
             if current_batch <= 0:
-                base_dir = "./fl_worker/fl_data"
+                return "./fl_worker/fl_data"
             else:
-                base_dir = os.path.join("./fl_worker", f"fl_data_{current_batch}")
+                return os.path.join("./fl_worker", f"fl_data_{current_batch}")
         except (ValueError, json.JSONDecodeError, OSError):
-            base_dir = "./fl_worker/fl_data"
-    else:
-        base_dir = "./fl_worker/fl_data"
+            pass
+    return "./fl_worker/fl_data"
 
-    if args.modality == "audio":
-        model = CNN14()
-        model = freeze_model_blocks(model).to(device)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--client_id", type=int, required=True)
+    parser.add_argument("--server_address", type=str, default=None)
+    parser.add_argument("--modality", type=str, choices=["audio", "image", "alignment"], default="audio")
+    parser.add_argument("--total_rounds", type=int, default=10)
+    parser.add_argument("--total_epochs", type=int, default=2, help="Local epochs per round")
+    args = parser.parse_args()
+
+    if args.server_address is None:
+        port_map = {"audio": 8080, "image": 8081, "alignment": 8082}
+        port = port_map.get(args.modality, 8080)
+        args.server_address = f"127.0.0.1:{port}"
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Khoi dong Client {args.client_id} ({args.modality.upper()}) tren {device}...")
+
+    api_client.update_training_state(
+        modality=args.modality,
+        total_rounds=args.total_rounds,
+        total_epochs=args.total_epochs,
+        connected_to_flower=False,
+        current_round=0,
+        status="connecting",
+    )
+
+    base_dir = _resolve_base_dir()
+
+    if args.modality == "alignment":
+        from prototype_fl_model import FLPrototypeModel
+
+        server_flower = os.path.join(_server_path, 'flower_server')
+        prototype_model = FLPrototypeModel(
+            image_pretrained_path=os.path.join(server_flower, 'pretrained_xray_multilabel.pth'),
+            audio_pretrained_path=os.path.join(server_flower, 'pretrained_audio_multilabel.pth'),
+        ).to(device)
+
+        image_loader, _ = load_client_data_image(args.client_id, base_dir=base_dir)
+        audio_loader, _ = load_client_data(args.client_id, base_dir=base_dir)
+
+        client = PrototypeAlignmentClient(
+            args.client_id, prototype_model, image_loader, audio_loader, device
+        ).to_client()
+    elif args.modality == "audio":
+        model = ASTMultiLabel(num_classes=2)
+        model = freeze_early_blocks(model).to(device)
         audio_dir = os.path.join(base_dir, "fl_audio")
         train_csv = os.path.join(base_dir, "metadata", "audio_fl", f"client_{args.client_id}_train.csv")
         val_csv = os.path.join(base_dir, "metadata", "audio_fl", f"client_{args.client_id}_val.csv")
@@ -307,29 +395,35 @@ if __name__ == "__main__":
         print(f"[Debug] Train CSV: {train_csv}")
         print(f"[Debug] Val CSV: {val_csv}")
         trainloader, valloader = load_client_data(args.client_id, base_dir=base_dir)
+        num_classes = 2
+        client = AdvancedPneumoniaClient(
+            args.client_id, model, trainloader, valloader, device,
+            num_classes=num_classes, local_epochs=args.total_epochs
+        ).to_client()
     else:
-        model = ResNet18(in_channels=3)
-        model = freeze_image_blocks(model).to(device)
+        model = DenseNet121MultiLabel(num_classes=3)
+        model = freeze_backbone(model).to(device)
         trainloader, valloader = load_client_data_image(args.client_id, base_dir=base_dir)
+        num_classes = 3
+        client = AdvancedPneumoniaClient(
+            args.client_id, model, trainloader, valloader, device,
+            num_classes=num_classes, local_epochs=args.total_epochs
+        ).to_client()
 
-    # ---- Start Flower client (blocking) ----
-    api_client.update_training_state(connected_to_flower=True, status="online")
+    api_client.update_training_state(connected_to_flower=True, status="training")
     print(f"Ket noi den Flower server {args.server_address}...")
 
     try:
         fl.client.start_client(
             server_address=args.server_address,
-            client=AdvancedPneumoniaClient(
-                args.client_id,
-                model,
-                trainloader,
-                valloader,
-                device,
-                local_epochs=args.total_epochs,
-            ).to_client(),
+            client=client,
             grpc_max_message_length=1024 * 1024 * 1024,
         )
     except KeyboardInterrupt:
         print("\nInterrupted. Shutting down...")
     finally:
-        api_client.shutdown()
+        api_client.update_training_state(
+            connected_to_flower=False,
+            training_active=False,
+            status="online",
+        )

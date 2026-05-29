@@ -1,30 +1,46 @@
-import numpy as np
+"""Ontology-guided fusion: maps acoustic attributes to disease probabilities.
 
-class LateFusion:
-    def __init__(self, audio_weight=0.4, image_weight=0.6):
-        # Chuẩn hóa để đảm bảo tổng trọng số luôn = 1.0 (tránh lỗi do user nhập sai)
-        total = audio_weight + image_weight
-        self.w_audio = audio_weight / total
-        self.w_image = image_weight / total
+Ontology rules:
+  - Crackle -> Pneumonia + Fibrosis
+  - Wheeze  -> COPD/Emphysema
 
-    def fuse(self, audio_score, image_score):
-        """
-        Gộp điểm số dựa trên độ tự tin (Adaptive Confidence Fusion).
-        Trả về điểm cuối cùng và mức độ đóng góp (trọng số) của từng nhánh.
-        """
-        audio_conf = abs(audio_score - 0.5)
-        image_conf = abs(image_score - 0.5)
+Fusion formula:
+  p_disease = max(image_prob, acoustic_prob * audio_weight)
+"""
 
-        # Nếu cả 2 đều phân vân (score ~ 0.5), dùng trọng số tĩnh ban đầu
-        if audio_conf < 0.01 and image_conf < 0.01:
-            final_score = (audio_score * self.w_audio) + (image_score * self.w_image)
-            return final_score, self.w_audio, self.w_image
 
-        # Tính toán lại trọng số động
-        total_conf = audio_conf + image_conf
-        dyn_w_audio = audio_conf / total_conf
-        dyn_w_image = image_conf / total_conf
+class OntologyFusion:
+    def __init__(self, audio_weight=0.4):
+        self.w_audio = audio_weight
 
-        final_score = (audio_score * dyn_w_audio) + (image_score * dyn_w_image)
-        
-        return final_score, dyn_w_audio, dyn_w_image
+    def fuse(self, audio_probs: dict, image_probs: dict) -> dict:
+        crackle = audio_probs.get("Crackle", 0)
+        wheeze = audio_probs.get("Wheeze", 0)
+
+        pneu_img = image_probs.get("Pneumonia", 0)
+        copd_img = image_probs.get("COPD_Emphysema", 0)
+        fibr_img = image_probs.get("Fibrosis", 0)
+
+        p_pneumonia = max(pneu_img, crackle * self.w_audio)
+        p_copd = max(copd_img, wheeze * self.w_audio)
+        p_fibrosis = max(fibr_img, crackle * self.w_audio * 0.5)
+
+        return {
+            "Pneumonia": round(p_pneumonia, 4),
+            "COPD_Emphysema": round(p_copd, 4),
+            "Fibrosis": round(p_fibrosis, 4),
+            "Normal": round(1.0 - max(p_pneumonia, p_copd, p_fibrosis), 4),
+        }
+
+    def get_binary_score(self, fusion_result: dict) -> float:
+        return max(
+            fusion_result.get("Pneumonia", 0),
+            fusion_result.get("COPD_Emphysema", 0),
+            fusion_result.get("Fibrosis", 0),
+        )
+
+    def get_primary_disease(self, fusion_result: dict) -> tuple:
+        diseases = ["Pneumonia", "COPD_Emphysema", "Fibrosis"]
+        scores = [fusion_result.get(d, 0) for d in diseases]
+        best_idx = max(range(len(scores)), key=lambda i: scores[i])
+        return diseases[best_idx], scores[best_idx]

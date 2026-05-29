@@ -5,6 +5,11 @@ export interface HealthResponse {
   client_id: string | null;
 }
 
+/** Multi-label probability per disease/acoustic attribute */
+export interface ClassProbabilities {
+  [className: string]: number;
+}
+
 export interface DiagnosisResult {
   mode: string;
   result: {
@@ -13,14 +18,18 @@ export interface DiagnosisResult {
     threshold: number;
   };
   scores: {
-    audio_score: number | null;
-    image_score: number | null;
-    fusion_score: number | null;
+    /** Multi-label: {"Crackle": 0.7, "Wheeze": 0.1} — null if mode != audio/fusion */
+    audio_scores: ClassProbabilities | null;
+    /** Multi-label: {"Pneumonia": 0.8, "COPD_Emphysema": 0.1, "Fibrosis": 0.05} — null if mode != image/fusion */
+    image_scores: ClassProbabilities | null;
+    /** Ontology-fused: {"Pneumonia": 0.8, "COPD_Emphysema": 0.1, "Fibrosis": 0.05, "Normal": 0.2} — only in fusion mode */
+    fusion_scores: ClassProbabilities | null;
   };
   saved: {
     audio_dest: string | null;
     image_dest: string | null;
   };
+  heatmap_path: string | null;
   timestamp: string;
 }
 
@@ -31,6 +40,14 @@ export interface SystemMetrics {
   gpu_temp: number | null;
   disk_percent: number;
   latency_ms: number;
+}
+
+export interface DatasetInfo {
+  total_samples: number;
+  audio_samples: number;
+  image_samples: number;
+  has_audio: boolean;
+  has_image: boolean;
 }
 
 export interface TrainingState {
@@ -57,6 +74,7 @@ export interface TrainingState {
   last_heartbeat: string | null;
   latency_ms: number;
   training_active: boolean;
+  dataset_info: DatasetInfo;
   system: SystemMetrics;
   recent_logs: LogEntry[];
 }
@@ -86,6 +104,18 @@ export interface HistoryListResponse {
   page_size: number;
 }
 
+export interface AvailableJob {
+  job_id: string;
+  name: string;
+  task_type: string;
+  num_rounds: number;
+  min_clients: number;
+  joined_clients: string[];
+  port: number;
+  strategy: string;
+  has_data: boolean;
+}
+
 export interface ReviewListResponse extends HistoryListResponse {}
 
 export interface ReviewApproveRequest {
@@ -112,6 +142,7 @@ export interface TrainingStartRequest {
   total_rounds: number;
   total_epochs: number;
   server_address?: string;
+  job_id?: string;
 }
 
 export interface TrainingStartResponse {
@@ -120,4 +151,19 @@ export interface TrainingStartResponse {
   modality: string;
   total_rounds: number;
   total_epochs: number;
+  job_id?: string | null;
 }
+
+/** Disease & acoustic labels for display */
+export const DISEASE_NAMES = ["Pneumonia", "COPD_Emphysema", "Fibrosis"];
+export const DISEASE_COLORS: Record<string, string> = {
+  Pneumonia: "#ef4444",
+  COPD_Emphysema: "#f97316",
+  Fibrosis: "#8b5cf6",
+  Normal: "#22c55e",
+};
+export const ACOUSTIC_NAMES = ["Crackle", "Wheeze"];
+export const ACOUSTIC_COLORS: Record<string, string> = {
+  Crackle: "#06b6d4",
+  Wheeze: "#eab308",
+};

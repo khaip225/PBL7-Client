@@ -14,9 +14,9 @@ class DiagnosisRequest(BaseModel):
 
 
 class ScoreDetail(BaseModel):
-    audio_score: float | None = None
-    image_score: float | None = None
-    fusion_score: float | None = None
+    audio_scores: dict | None = None    # {"Crackle": 0.7, "Wheeze": 0.1}
+    image_scores: dict | None = None    # {"Pneumonia": 0.8, "COPD_Emphysema": 0.1, "Fibrosis": 0.05}
+    fusion_scores: dict | None = None   # {"Pneumonia": 0.8, "COPD_Emphysema": 0.1, "Fibrosis": 0.05, "Normal": 0.2}
 
 
 class DiagnosisResult(BaseModel):
@@ -35,7 +35,20 @@ class DiagnosisResponse(BaseModel):
     result: DiagnosisResult
     scores: ScoreDetail
     saved: SavedPaths
+    heatmap_path: str | None = None
     timestamp: str
+
+
+class AvailableJob(BaseModel):
+    job_id: str
+    name: str
+    task_type: str
+    num_rounds: int
+    min_clients: int
+    joined_clients: list[str] = []
+    port: int
+    strategy: str
+    has_data: bool = False
 
 
 class TrainingStartRequest(BaseModel):
@@ -43,6 +56,7 @@ class TrainingStartRequest(BaseModel):
     total_rounds: int = 10
     total_epochs: int = 2
     server_address: str | None = None
+    job_id: str | None = None
 
 
 class TrainingStartResponse(BaseModel):
@@ -51,6 +65,7 @@ class TrainingStartResponse(BaseModel):
     modality: str
     total_rounds: int
     total_epochs: int
+    job_id: str | None = None
 
 
 class TrainingStopResponse(BaseModel):
@@ -71,6 +86,14 @@ class LogEntry(BaseModel):
     timestamp: str
     level: str
     message: str
+
+
+class DatasetInfo(BaseModel):
+    total_samples: int = 0
+    audio_samples: int = 0
+    image_samples: int = 0
+    has_audio: bool = False
+    has_image: bool = False
 
 
 class TrainingStateResponse(BaseModel):
@@ -97,6 +120,7 @@ class TrainingStateResponse(BaseModel):
     last_heartbeat: str | None = None
     latency_ms: int = 0
     training_active: bool
+    dataset_info: DatasetInfo = DatasetInfo()
     system: SystemMetrics
     recent_logs: list[LogEntry] = []
 
