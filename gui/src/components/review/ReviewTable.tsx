@@ -1,16 +1,10 @@
 import type { HistoryRecord } from "../../lib/types";
+import { ALL_COLORS } from "../../lib/types";
 
 interface Props {
   items: HistoryRecord[];
   onSelect: (item: HistoryRecord) => void;
   selectedId?: string;
-}
-
-function formatLabel(label: string) {
-  const lower = label.toLowerCase();
-  if (lower === "normal") return "Normal";
-  if (lower === "abnormal") return "Abnormal";
-  return label;
 }
 
 export default function ReviewTable({ items, onSelect, selectedId }: Props) {
@@ -29,15 +23,14 @@ export default function ReviewTable({ items, onSelect, selectedId }: Props) {
           <thead>
             <tr className="border-b border-gray-800 bg-gray-900/50">
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Thời gian</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Nhận gợi ý</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Nhãn gợi ý</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Mode</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Confidence</th>
             </tr>
           </thead>
           <tbody>
             {items.map((item) => {
-              const label = formatLabel(item.label);
-              const isNormal = label.toLowerCase() === "normal";
+              const displayLabels = item.labels ?? [];
               return (
                 <tr
                   key={item.id}
@@ -50,15 +43,21 @@ export default function ReviewTable({ items, onSelect, selectedId }: Props) {
                     {item.timestamp}
                   </td>
                   <td className="px-4 py-3">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                        isNormal
-                          ? "bg-green-600/15 text-green-400"
-                          : "bg-red-600/15 text-red-400"
-                      }`}
-                    >
-                      {label}
-                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {displayLabels.map((label) => (
+                        <span
+                          key={label}
+                          className="rounded-full px-2 py-0.5 text-xs font-medium border"
+                          style={{
+                            backgroundColor: (ALL_COLORS[label] ?? "#6b7280") + "20",
+                            color: ALL_COLORS[label] ?? "#6b7280",
+                            borderColor: (ALL_COLORS[label] ?? "#6b7280") + "40",
+                          }}
+                        >
+                          {label}
+                        </span>
+                      ))}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-gray-400">{item.mode}</td>
                   <td className="px-4 py-3 text-gray-300">

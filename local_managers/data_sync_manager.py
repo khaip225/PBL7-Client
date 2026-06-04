@@ -56,7 +56,13 @@ class DataSyncManager:
         self._write_state(state)
         return state
 
-    def sync_record(self, audio_path: str | None, image_path: str | None, label: str) -> SyncResult:
+    def sync_record(self, audio_path: str | None, image_path: str | None, labels: dict[str, bool]) -> SyncResult:
+        """
+        Sync approved records to FL training directories.
+
+        Args:
+            labels: dict[str, bool] — class name → true/false (e.g. {"Pneumonia": true, "Crackle": false})
+        """
         state = self.load_state()
         batch_dir = self._ensure_batch_dir(int(state.get("current_batch", 1)))
 
@@ -65,13 +71,14 @@ class DataSyncManager:
         csv_path = None
 
         if audio_path:
-            audio_segments, csv_path = self._sync_audio_segments(audio_path, batch_dir, label)
+            audio_segments, csv_path = self._sync_audio_segments(audio_path, batch_dir, labels)
             audio_dest = audio_segments[0] if audio_segments else None
 
         if image_path:
-            class_dir = "PNEUMONIA" if label == "Abnormal" else "NORMAL"
-            image_dest_dir = batch_dir / "fl_image" / class_dir
+            image_dest_dir = batch_dir / "fl_image"
             image_dest = self._move_to_batch(image_path, image_dest_dir)
+            # Write multi-label image CSV
+            self._append_image_ledger(batch_dir, str(image_dest), labels)
 
         return SyncResult(audio_dest=audio_dest, image_dest=image_dest, batch_dir=str(batch_dir), csv_path=csv_path)
 
@@ -86,8 +93,32 @@ class DataSyncManager:
 
         return str(dest_path)
 
-    def _append_audio_ledger(self, batch_dir: Path, audio_path: str, label: str) -> str:
-        label_code = 1 if label == "Abnormal" else 0
+    def _append_image_ledger(self, batch_dir: Path, image_path: str, labels: dict[str, bool]) -> str:
+        """Write multi-label image CSV: path, Pneumonia, COPD_Emphysema, Fibrosis"""
+        csv_dir = batch_dir / "metadata" / "image_fl"
+        csv_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = csv_dir / f"client_{self.client_id}_train.csv"
+
+        pneu = 1 if labels.get("Pneumonia", False) else 0
+        copd = 1 if labels.get("COPD_Emphysema", False) else 0
+        fibr = 1 if labels.get("Fibrosis", False) else 0
+
+        if not csv_path.exists():
+            with csv_path.open("w", encoding="utf-8", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["path", "Pneumonia", "COPD_Emphysema", "Fibrosis"])
+
+        with csv_path.open("a", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([os.path.basename(image_path), pneu, copd, fibr])
+
+        return str(csv_path)
+
+    def _append_audio_ledger(self, batch_dir: Path, audio_path: str, labels: dict[str, bool]) -> str:
+        """Write multi-label audio CSV: path, crackle, wheeze"""
+        crackle = 1 if labels.get("Crackle", False) else 0
+        wheeze = 1 if labels.get("Wheeze", False) else 0
+
         csv_dir = batch_dir / "metadata" / "audio_fl"
         csv_dir.mkdir(parents=True, exist_ok=True)
         csv_path = csv_dir / f"{self.client_tag}_train.csv"
@@ -95,19 +126,22 @@ class DataSyncManager:
         if not csv_path.exists():
             with csv_path.open("w", encoding="utf-8", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["path", "label"])
+                writer.writerow(["path", "crackle", "wheeze"])
 
         with csv_path.open("a", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow([os.path.basename(audio_path), label_code])
+            writer.writerow([os.path.basename(audio_path), crackle, wheeze])
 
         return str(csv_path)
 
-    def _sync_audio_segments(self, audio_path: str, batch_dir: Path, label: str) -> tuple[list[str], str | None]:
+    def _sync_audio_segments(self, audio_path: str, batch_dir: Path, labels: dict[str, bool]) -> tuple[list[str], str | None]:
         dest_dir = batch_dir / "fl_audio"
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        label = "Abnormal" if label == "Abnormal" else "Normal"
+        # Determine if any abnormal label is present (not Normal)
+        is_abnormal = any(v for k, v in labels.items() if k != "Normal")
+        label_str = "Abnormal" if is_abnormal else "Normal"
+
         meta = self._load_segment_metadata(audio_path)
 
         audio_data, sr = sf.read(audio_path)
@@ -119,7 +153,7 @@ class DataSyncManager:
             segments = self._generate_segments(duration, meta["chunk_duration"], meta["overlap"])
 
         selected = []
-        if label == "Normal":
+        if label_str == "Normal":
             selected = segments
         else:
             threshold = meta["threshold"]
@@ -145,8 +179,9 @@ class DataSyncManager:
             sf.write(segment_path, segment_audio, sr)
 
             segment_paths.append(str(segment_path))
-            csv_path = self._append_audio_ledger(batch_dir, str(segment_path), label)
-            txt_lines.append(f"{start:.3f}\t{end:.3f}\t{1 if label == 'Abnormal' else 0}")
+            csv_path = self._append_audio_ledger(batch_dir, str(segment_path), labels)
+            abnormal_flag = 1 if label_str == "Abnormal" else 0
+            txt_lines.append(f"{start:.3f}\t{end:.3f}\t{abnormal_flag}")
 
         if txt_lines:
             txt_path = dest_dir / f"{stem}.txt"
@@ -209,6 +244,7 @@ class DataSyncManager:
         (batch_dir / "fl_audio").mkdir(parents=True, exist_ok=True)
         (batch_dir / "fl_image").mkdir(parents=True, exist_ok=True)
         (batch_dir / "metadata" / "audio_fl").mkdir(parents=True, exist_ok=True)
+        (batch_dir / "metadata" / "image_fl").mkdir(parents=True, exist_ok=True)
 
         return batch_dir
 

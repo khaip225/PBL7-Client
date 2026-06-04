@@ -30,8 +30,8 @@ export function useReview() {
     }
   }, []);
 
-  const approve = useCallback(async (recordId: string, label: string) => {
-    return api.review.approve(recordId, { label });
+  const approve = useCallback(async (recordId: string, labels: Record<string, boolean>) => {
+    return api.review.approve(recordId, { labels });
   }, []);
 
   const advanceBatch = useCallback(async () => {
@@ -40,5 +40,9 @@ export function useReview() {
     return res;
   }, []);
 
-  return { data, loading, error, state, fetch, fetchState, approve, advanceBatch };
+  const reject = useCallback(async (recordId: string) => {
+    return api.review.reject(recordId);
+  }, []);
+
+  return { data, loading, error, state, fetch, fetchState, approve, advanceBatch, reject };
 }

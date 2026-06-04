@@ -289,17 +289,21 @@ if __name__ == "__main__":
     # --- Resolve data directory ---
     base_dir = args.base_dir if args.base_dir else _resolve_fl_base_dir()
 
+    # Normalize: "multimodal" → "alignment" for API register (TaskType enum)
+    register_type = args.modality if args.modality != "multimodal" else "alignment"
+
     # --- Report to API ---
     api_client.update_training_state(
-        modality=args.modality,
+        modality=register_type,  # Use register_type for API consistency
         total_rounds=args.total_rounds,
         total_epochs=args.total_epochs,
         connected_to_flower=False,
         current_round=0,
         status="connecting",
     )
+
     # Register with server
-    api_client.register(task_type=args.modality)
+    api_client.register(task_type=register_type)
     api_client.start_heartbeat()
 
     # --- Build client ---

@@ -1,33 +1,51 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import type { HistoryRecord } from "../../lib/types";
+import { ALL_LABELS, ALL_COLORS } from "../../lib/types";
 import { api } from "../../lib/api";
 
 interface Props {
   item: HistoryRecord;
-  onApprove: (recordId: string, label: string) => Promise<void>;
+  onApprove: (recordId: string, labels: Record<string, boolean>) => Promise<void>;
+  onReject?: (recordId: string) => Promise<void>;
   onClose: () => void;
 }
 
-function normalizeLabel(label: string) {
-  const lower = label.toLowerCase();
-  if (lower === "normal") return "Normal";
-  if (lower === "abnormal") return "Abnormal";
-  return "Normal";
-}
-
-export default function ReviewDetail({ item, onApprove, onClose }: Props) {
-  const [label, setLabel] = useState(() => normalizeLabel(item.label));
+export default function ReviewDetail({ item, onApprove, onReject, onClose }: Props) {
+  // Initialize checkboxes: pre-check labels from AI suggestion
+  const [labels, setLabels] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    for (const name of ALL_LABELS) {
+      init[name] = (item.labels ?? []).includes(name);
+    }
+    return init;
+  });
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
-  const displayLabel = useMemo(() => normalizeLabel(item.label), [item.label]);
+  const suggestedLabels = useMemo(() => item.labels ?? [], [item.labels]);
+
+  const toggleLabel = (name: string) => {
+    setLabels((prev) => ({ ...prev, [name]: !prev[name] }));
+  };
 
   const handleApprove = async () => {
     setSaving(true);
     try {
-      await onApprove(item.id, label);
+      await onApprove(item.id, labels);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!onReject) return;
+    setDeleting(true);
+    try {
+      await onReject(item.id);
+      onClose();
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -54,7 +72,21 @@ export default function ReviewDetail({ item, onApprove, onClose }: Props) {
           </div>
           <div>
             <span className="text-gray-500">Nhãn gợi ý:</span>
-            <p className="text-gray-300">{displayLabel}</p>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {suggestedLabels.map((label) => (
+                <span
+                  key={label}
+                  className="rounded-full px-2 py-0.5 text-xs font-medium border"
+                  style={{
+                    backgroundColor: (ALL_COLORS[label] ?? "#6b7280") + "20",
+                    color: ALL_COLORS[label] ?? "#6b7280",
+                    borderColor: (ALL_COLORS[label] ?? "#6b7280") + "40",
+                  }}
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
           </div>
           <div>
             <span className="text-gray-500">Mode:</span>
@@ -80,29 +112,68 @@ export default function ReviewDetail({ item, onApprove, onClose }: Props) {
           </div>
         )}
 
+        {/* Multi-label checkboxes */}
         <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-3">
-          <p className="text-xs text-gray-500 mb-2">Chọn nhãn chốt</p>
-          <div className="flex gap-3 text-sm">
-            <label className="flex items-center gap-2 text-gray-300">
-              <input
-                type="radio"
-                name="final-label"
-                value="Normal"
-                checked={label === "Normal"}
-                onChange={() => setLabel("Normal")}
-              />
-              Normal
-            </label>
-            <label className="flex items-center gap-2 text-gray-300">
-              <input
-                type="radio"
-                name="final-label"
-                value="Abnormal"
-                checked={label === "Abnormal"}
-                onChange={() => setLabel("Abnormal")}
-              />
-              Abnormal
-            </label>
+          <p className="text-xs text-gray-500 mb-3">Chọn nhãn chốt</p>
+
+          <div className="space-y-3">
+            {/* Diseases */}
+            <div>
+              <p className="text-xs text-gray-600 mb-1.5">🫁 Bệnh phổi</p>
+              <div className="flex flex-wrap gap-2">
+                {["Pneumonia", "COPD_Emphysema", "Fibrosis"].map((name) => (
+                  <label
+                    key={name}
+                    className="flex items-center gap-1.5 text-sm cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={labels[name] || false}
+                      onChange={() => toggleLabel(name)}
+                      className="accent-blue-500"
+                    />
+                    <span
+                      className="rounded-full px-2 py-0.5 text-xs font-medium"
+                      style={{
+                        backgroundColor: (ALL_COLORS[name] ?? "#6b7280") + "20",
+                        color: ALL_COLORS[name] ?? "#6b7280",
+                      }}
+                    >
+                      {name}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Acoustic */}
+            <div>
+              <p className="text-xs text-gray-600 mb-1.5">🔊 Dấu hiệu âm thanh</p>
+              <div className="flex flex-wrap gap-2">
+                {["Crackle", "Wheeze"].map((name) => (
+                  <label
+                    key={name}
+                    className="flex items-center gap-1.5 text-sm cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={labels[name] || false}
+                      onChange={() => toggleLabel(name)}
+                      className="accent-cyan-500"
+                    />
+                    <span
+                      className="rounded-full px-2 py-0.5 text-xs font-medium"
+                      style={{
+                        backgroundColor: (ALL_COLORS[name] ?? "#6b7280") + "20",
+                        color: ALL_COLORS[name] ?? "#6b7280",
+                      }}
+                    >
+                      {name}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -113,6 +184,16 @@ export default function ReviewDetail({ item, onApprove, onClose }: Props) {
         >
           {saving ? "Đang đồng bộ..." : "Lưu và đồng bộ"}
         </button>
+
+        {onReject && (
+          <button
+            onClick={handleReject}
+            disabled={deleting}
+            className="w-full rounded-lg border border-yellow-600/30 bg-yellow-600/10 px-3 py-2 text-sm font-semibold text-yellow-400 hover:bg-yellow-600/20 disabled:opacity-60"
+          >
+            {deleting ? "Đang chuyển..." : "Bỏ vào thùng rác"}
+          </button>
+        )}
       </div>
     </div>
   );

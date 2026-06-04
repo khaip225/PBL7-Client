@@ -27,7 +27,7 @@ class Config:
     AUDIO_SEGMENT_THRESHOLD: float = float(os.getenv("AUDIO_SEGMENT_THRESHOLD", "0.5"))
 
     STATE_FILE: str = os.getenv("STATE_FILE", "./client_state.json")
-    FL_DATA_DIR: str = os.getenv("FL_DATA_DIR", "./fl_worker/fl_data")
+    FL_DATA_DIR: str = os.getenv("FL_DATA_DIR", "./Local_Data/fl_data")
     FL_SYNC_ENABLED: bool = _env_bool("FL_SYNC_ENABLED", False)
 
     # Multi-label config

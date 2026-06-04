@@ -4,6 +4,7 @@ import DiagnosisPage from "./components/diagnosis/DiagnosisPage";
 import TrainingPage from "./components/training/TrainingPage";
 import HistoryPage from "./components/history/HistoryPage";
 import ReviewPage from "./components/review/ReviewPage";
+import TrashPage from "./components/review/TrashPage";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("diagnosis");
@@ -14,6 +15,7 @@ export default function App() {
       {tab === "training" && <TrainingPage />}
       {tab === "review" && <ReviewPage />}
       {tab === "history" && <HistoryPage />}
+      {tab === "trash" && <TrashPage />}
     </AppShell>
   );
 }

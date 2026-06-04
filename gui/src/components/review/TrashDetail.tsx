@@ -1,15 +1,38 @@
+import { useState } from "react";
+import { X, RotateCcw, Trash2 } from "lucide-react";
 import type { HistoryRecord } from "../../lib/types";
 import { ALL_COLORS } from "../../lib/types";
 import { api } from "../../lib/api";
-import { X } from "lucide-react";
 
 interface Props {
   item: HistoryRecord;
+  onRestore: (recordId: string) => Promise<void>;
+  onDelete: (recordId: string) => Promise<void>;
   onClose: () => void;
 }
 
-export default function HistoryDetail({ item, onClose }: Props) {
+export default function TrashDetail({ item, onRestore, onDelete, onClose }: Props) {
+  const [restoring, setRestoring] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const displayLabels = item.labels ?? [];
+
+  const handleRestore = async () => {
+    setRestoring(true);
+    try {
+      await onRestore(item.id);
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      await onDelete(item.id);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div className="card relative">
@@ -20,20 +43,23 @@ export default function HistoryDetail({ item, onClose }: Props) {
         <X size={18} />
       </button>
 
-      <h3 className="text-sm font-semibold text-gray-300 mb-4">Chi tiết</h3>
+      <h3 className="text-sm font-semibold text-gray-300 mb-4 flex items-center gap-2">
+        <Trash2 size={16} className="text-yellow-500" />
+        Chi tiết trong thùng rác
+      </h3>
 
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div>
             <span className="text-gray-500">ID:</span>
-            <p className="text-gray-300 font-mono text-xs">{item.id}</p>
+            <p className="text-gray-300 font-mono text-xs break-all">{item.id}</p>
           </div>
           <div>
             <span className="text-gray-500">Thời gian:</span>
             <p className="text-gray-300">{item.timestamp}</p>
           </div>
           <div className="col-span-2">
-            <span className="text-gray-500">Kết quả:</span>
+            <span className="text-gray-500">Nhãn AI dự đoán:</span>
             <div className="flex flex-wrap gap-1.5 mt-1">
               {displayLabels.map((label) => (
                 <span
@@ -68,7 +94,7 @@ export default function HistoryDetail({ item, onClose }: Props) {
           <div>
             <p className="text-xs text-gray-500 mb-2">Ảnh X-quang</p>
             <img
-              src={api.history.imageUrl(item.id)}
+              src={api.review.trashImageUrl(item.id)}
               alt="X-quang"
               className="rounded-lg border border-gray-800 max-h-64 object-contain bg-black"
             />
@@ -78,9 +104,29 @@ export default function HistoryDetail({ item, onClose }: Props) {
         {(item.audio_file || item.audio_path) && (
           <div>
             <p className="text-xs text-gray-500 mb-2">Audio</p>
-            <audio controls src={api.history.audioUrl(item.id)} className="w-full" />
+            <audio controls src={api.review.trashAudioUrl(item.id)} className="w-full" />
           </div>
         )}
+
+        {/* Actions */}
+        <div className="space-y-2 pt-3 border-t border-gray-800">
+          <button
+            onClick={handleRestore}
+            disabled={restoring}
+            className="w-full rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-500 disabled:opacity-60 flex items-center justify-center gap-2"
+          >
+            <RotateCcw size={14} />
+            {restoring ? "Đang khôi phục..." : "Khôi phục về pending"}
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="w-full rounded-lg border border-red-600/30 bg-red-600/10 px-3 py-2 text-sm font-semibold text-red-400 hover:bg-red-600/20 disabled:opacity-60 flex items-center justify-center gap-2"
+          >
+            <Trash2 size={14} />
+            {deleting ? "Đang xóa..." : "Xóa vĩnh viễn"}
+          </button>
+        </div>
       </div>
     </div>
   );

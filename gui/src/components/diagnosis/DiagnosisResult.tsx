@@ -1,5 +1,5 @@
 import type { DiagnosisResult as DR, ClassProbabilities } from "../../lib/types";
-import { DISEASE_NAMES, DISEASE_COLORS, ACOUSTIC_NAMES, ACOUSTIC_COLORS } from "../../lib/types";
+import { DISEASE_NAMES, DISEASE_COLORS, ACOUSTIC_NAMES, ACOUSTIC_COLORS, ALL_COLORS, ALL_LABELS } from "../../lib/types";
 
 interface Props {
   result: DR;
@@ -62,11 +62,10 @@ function ScoreGroup({
 }
 
 export default function DiagnosisResult({ result }: Props) {
-  const { label, confidence } = result.result;
+  const { labels, confidence } = result.result;
   const { audio_scores, image_scores, fusion_scores } = result.scores;
 
-  const isNormal = label === "Normal";
-  const barColor = isNormal ? "#22c55e" : "#ef4444";
+  const allNormal = labels.length === 1 && labels[0] === "Normal";
 
   return (
     <div className="card space-y-4">
@@ -76,21 +75,37 @@ export default function DiagnosisResult({ result }: Props) {
         <span className="text-xs text-gray-500">{result.timestamp}</span>
       </div>
 
-      {/* Primary result badge */}
-      <div
-        className={`flex items-center gap-3 rounded-lg px-4 py-3 ${
-          isNormal
-            ? "bg-green-600/10 border border-green-600/30"
-            : "bg-red-600/10 border border-red-600/30"
-        }`}
-      >
-        <span
-          className={`flex h-3 w-3 rounded-full ${isNormal ? "bg-green-400" : "bg-red-400"}`}
-        />
-        <span className={`text-lg font-bold ${isNormal ? "text-green-400" : "text-red-400"}`}>
-          {isNormal ? "Binh thuong" : "Bat thuong"}
-        </span>
-        <span className="text-sm text-gray-400 ml-auto">{label}</span>
+      {/* Detected labels — multi-label badges */}
+      <div className="rounded-lg border border-gray-700 bg-gray-900/40 px-4 py-3">
+        <p className="text-xs text-gray-500 mb-2 font-semibold uppercase tracking-wide">
+          Phat hien
+        </p>
+        {allNormal ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium bg-green-600/15 text-green-400 border border-green-600/30">
+            <span className="flex h-2 w-2 rounded-full bg-green-400" />
+            Binh thuong
+          </span>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {labels.map((label) => (
+              <span
+                key={label}
+                className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium border"
+                style={{
+                  backgroundColor: (ALL_COLORS[label] ?? "#6b7280") + "20",
+                  color: ALL_COLORS[label] ?? "#6b7280",
+                  borderColor: (ALL_COLORS[label] ?? "#6b7280") + "40",
+                }}
+              >
+                <span
+                  className="flex h-2 w-2 rounded-full"
+                  style={{ backgroundColor: ALL_COLORS[label] ?? "#6b7280" }}
+                />
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Overall confidence bar */}
@@ -98,23 +113,47 @@ export default function DiagnosisResult({ result }: Props) {
         <p className="text-xs text-gray-500 font-semibold uppercase tracking-wide">
           Do tin cay
         </p>
-        <ProbBar name="Confidence" value={confidence / 100} color={barColor} />
+        <ProbBar
+          name="Confidence"
+          value={confidence / 100}
+          color={allNormal ? "#22c55e" : "#ef4444"}
+        />
       </div>
 
-      {/* Disease probabilities (image / fusion mode) */}
+      {/* Disease probabilities (image / fusion / audio→image inferred) */}
       {(result.mode === "image" || result.mode === "fusion") && (
         <ScoreGroup
-          title={result.mode === "fusion" ? "🫁 Benh phoi (Fusion Ontology)" : "🫁 Benh phoi"}
+          title={result.mode === "fusion" ? "🫁 Bệnh phổi (Fusion Ontology)" : "🫁 Bệnh phổi"}
           scores={result.mode === "fusion" ? fusion_scores : image_scores}
           names={[...DISEASE_NAMES, ...(result.mode === "fusion" ? ["Normal"] : [])]}
           colors={DISEASE_COLORS}
         />
       )}
 
-      {/* Acoustic attributes (audio / fusion mode) */}
+      {/* Cross-modal: audio → inferred disease (audio-only mode) */}
+      {result.mode === "audio" && image_scores && (
+        <ScoreGroup
+          title="🫁 Bệnh phổi (Suy luận từ âm thanh)"
+          scores={image_scores}
+          names={DISEASE_NAMES}
+          colors={DISEASE_COLORS}
+        />
+      )}
+
+      {/* Acoustic attributes (audio / fusion / image→acoustic inferred) */}
       {(result.mode === "audio" || result.mode === "fusion") && (
         <ScoreGroup
-          title="🔊 Thuoc tinh am thanh"
+          title="🔊 Thuộc tính âm thanh"
+          scores={audio_scores}
+          names={ACOUSTIC_NAMES}
+          colors={ACOUSTIC_COLORS}
+        />
+      )}
+
+      {/* Cross-modal: image → inferred acoustic (image-only mode) */}
+      {result.mode === "image" && audio_scores && (
+        <ScoreGroup
+          title="🔊 Thuộc tính âm thanh (Suy luận từ ảnh)"
           scores={audio_scores}
           names={ACOUSTIC_NAMES}
           colors={ACOUSTIC_COLORS}

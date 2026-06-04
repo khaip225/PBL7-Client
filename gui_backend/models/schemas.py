@@ -20,7 +20,7 @@ class ScoreDetail(BaseModel):
 
 
 class DiagnosisResult(BaseModel):
-    label: str
+    labels: list[str]       # multi-label: all classes with prob >= threshold
     confidence: float
     threshold: float
 
@@ -128,7 +128,7 @@ class TrainingStateResponse(BaseModel):
 class HistoryRecord(BaseModel):
     id: str
     timestamp: str
-    label: str
+    labels: list[str]       # multi-label: detected classes
     mode: str
     audio_file: str | None = None
     image_file: str | None = None
@@ -149,12 +149,12 @@ class ReviewListResponse(HistoryListResponse):
 
 
 class ReviewApproveRequest(BaseModel):
-    label: str
+    labels: dict[str, bool]  # class name → true/false
 
 
 class ReviewApproveResponse(BaseModel):
     record_id: str
-    label: str
+    labels: dict[str, bool]
     audio_dest: str | None = None
     image_dest: str | None = None
     batch_dir: str

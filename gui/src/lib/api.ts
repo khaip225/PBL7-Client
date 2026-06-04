@@ -5,6 +5,7 @@ import type {
   TrainingStartRequest,
   TrainingStartResponse,
   AvailableJob,
+  HistoryRecord,
   HistoryListResponse,
   ReviewApproveRequest,
   ReviewApproveResponse,
@@ -69,6 +70,26 @@ export const api = {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       }),
+    reject: (recordId: string) =>
+      request<{ record_id: string; moved_files: string[] }>(
+        `/api/review/${recordId}/reject`,
+        { method: "POST" }
+      ),
+    /** Thùng rác */
+    listTrash: () =>
+      request<HistoryRecord[]>("/api/review/trash"),
+    restoreFromTrash: (recordId: string) =>
+      request<{ record_id: string; restored_files: string[] }>(
+        `/api/review/trash/${recordId}/restore`,
+        { method: "POST" }
+      ),
+    deletePermanently: (recordId: string) =>
+      request<{ record_id: string; deleted_files: string[] }>(
+        `/api/review/trash/${recordId}/delete`,
+        { method: "POST" }
+      ),
+    trashImageUrl: (recordId: string) => `/api/review/trash/${recordId}/image`,
+    trashAudioUrl: (recordId: string) => `/api/review/trash/${recordId}/audio`,
     getState: () => request<ReviewStateResponse>("/api/review/state"),
     advanceBatch: () =>
       request<ReviewStateResponse>("/api/review/advance-batch", {

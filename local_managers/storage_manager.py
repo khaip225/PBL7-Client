@@ -1,4 +1,5 @@
 import csv
+import json
 import os
 import shutil
 from datetime import datetime
@@ -25,19 +26,26 @@ class StorageManager:
         self.fl_data_dir = config.FL_DATA_DIR
         self.fl_image_dir = os.path.join(self.fl_data_dir, "fl_image")
 
-    def save_files(self, audio_source, image_source, label, *, mode=None, confidence=None, scores=None):
+    def save_files(self, audio_source, image_source, labels, *, mode=None, confidence=None, scores=None):
+        """Save diagnosis files with multi-label support.
+
+        Args:
+            labels: list[str] — detected disease/acoustic classes (e.g. ["Pneumonia", "Crackle"])
+        """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Join labels for filename prefix
+        label_str = "_".join(labels) if labels else "Normal"
         audio_dest, image_dest = None, None
 
         if audio_source is not None:
             audio_ext = os.path.splitext(audio_source)[1]
-            new_audio_name = f"{label}_{timestamp}{audio_ext}"
+            new_audio_name = f"{label_str}_{timestamp}{audio_ext}"
             audio_dest = os.path.join(self.audio_dir, new_audio_name)
             shutil.copy2(audio_source, audio_dest)
 
         if image_source is not None:
             image_ext = os.path.splitext(image_source)[1]
-            new_image_name = f"{label}_{timestamp}{image_ext}"
+            new_image_name = f"{label_str}_{timestamp}{image_ext}"
             image_dest = os.path.join(self.image_dir, new_image_name)
             shutil.copy2(image_source, image_dest)
 
@@ -52,7 +60,7 @@ class StorageManager:
         self._write_metadata(
             timestamp=timestamp,
             mode=mode,
-            label=label,
+            labels=labels,
             confidence=confidence,
             audio_path=audio_dest,
             image_path=image_dest,
@@ -61,12 +69,13 @@ class StorageManager:
 
         if getattr(config, 'FL_SYNC_ENABLED', False):
             # Sync to FL training directories only when explicitly enabled
-            self._sync_to_fl_data(audio_source, image_source, label, timestamp)
+            self._sync_to_fl_data(audio_source, image_source, labels, timestamp)
 
         return audio_dest, image_dest
 
-    def _write_metadata(self, *, timestamp, mode, label, confidence, audio_path, image_path, scores):
-        record_id = f"{label}_{timestamp}"
+    def _write_metadata(self, *, timestamp, mode, labels, confidence, audio_path, image_path, scores):
+        label_str = "_".join(labels) if labels else "Normal"
+        record_id = f"{label_str}_{timestamp}"
         audio_file = os.path.basename(audio_path) if audio_path else None
         image_file = os.path.basename(image_path) if image_path else None
 
@@ -75,6 +84,7 @@ class StorageManager:
             "timestamp",
             "mode",
             "label",
+            "detected_labels",
             "confidence",
             "audio_file",
             "image_file",
@@ -94,7 +104,8 @@ class StorageManager:
                 "record_id": record_id,
                 "timestamp": timestamp,
                 "mode": mode,
-                "label": label,
+                "label": label_str,
+                "detected_labels": json.dumps(labels, ensure_ascii=False),
                 "confidence": confidence,
                 "audio_file": audio_file,
                 "image_file": image_file,
@@ -136,25 +147,22 @@ class StorageManager:
 
         return str(next_dir)
 
-    def _sync_to_fl_data(self, audio_source, image_source, label, timestamp):
-        # Map disease label to multi-label codes
-        disease_map = {
-            "Normal": (0, 0, 0),
-            "Pneumonia": (1, 0, 0),
-            "COPD_Emphysema": (0, 1, 0),
-            "Fibrosis": (0, 0, 1),
-            "Crackle": (1, 0, 0),
-            "Wheeze": (0, 1, 0),
-            "Crackle + Wheeze": (1, 1, 0),
-        }
-        pneu, copd, fibr = disease_map.get(label, (0, 0, 0))
+    def _sync_to_fl_data(self, audio_source, image_source, labels, timestamp):
+        """Sync files to FL data directories with multi-label support."""
+        label_str = "_".join(labels) if labels else "Normal"
+        # Compute per-class indicators from labels list
+        pneu = 1 if "Pneumonia" in labels else 0
+        copd = 1 if "COPD_Emphysema" in labels else 0
+        fibr = 1 if "Fibrosis" in labels else 0
+        crackle = 1 if "Crackle" in labels else 0
+        wheeze = 1 if "Wheeze" in labels else 0
 
         # Image -> fl_image/ with multi-label CSV
         if image_source:
             dest_dir = self.fl_image_dir
             os.makedirs(dest_dir, exist_ok=True)
             ext = os.path.splitext(image_source)[1]
-            dest_name = f"{label}_{timestamp}{ext}"
+            dest_name = f"{label_str}_{timestamp}{ext}"
             dest = os.path.join(dest_dir, dest_name)
             shutil.copy2(image_source, dest)
 
@@ -174,7 +182,7 @@ class StorageManager:
             audio_dir = os.path.join(self.fl_data_dir, "fl_audio")
             os.makedirs(audio_dir, exist_ok=True)
             ext = os.path.splitext(audio_source)[1]
-            new_name = f"{label}_{timestamp}{ext}"
+            new_name = f"{label_str}_{timestamp}{ext}"
             dest = os.path.join(audio_dir, new_name)
             shutil.copy2(audio_source, dest)
 
@@ -186,20 +194,8 @@ class StorageManager:
                 with open(csv_path, "w", encoding="utf-8") as f:
                     f.write("path,crackle,wheeze\n")
 
-            # Audio labels: Crackle=1, Wheeze=1 for "Crackle + Wheeze"
-            audio_label_map = {
-                "Normal": (0, 0),
-                "Crackle": (1, 0),
-                "Wheeze": (0, 1),
-                "Crackle + Wheeze": (1, 1),
-                "Pneumonia": (1, 0),  # Pneumonia implies crackle
-                "COPD_Emphysema": (0, 1),  # COPD implies wheeze
-                "Fibrosis": (1, 0),  # Fibrosis implies fine crackle
-            }
-            cr, wh = audio_label_map.get(label, (0, 0))
-
             with open(csv_path, "a", encoding="utf-8") as f:
-                f.write(f"{new_name},{cr},{wh}\n")
+                f.write(f"{new_name},{crackle},{wheeze}\n")
 
     @staticmethod
     def _normalize_client_tag(client_id) -> str:

@@ -6,7 +6,7 @@ import ReviewTable from "./ReviewTable";
 import ReviewDetail from "./ReviewDetail";
 
 export default function ReviewPage() {
-  const { data, loading, error, state, fetch, fetchState, approve, advanceBatch } =
+  const { data, loading, error, state, fetch, fetchState, approve, advanceBatch, reject } =
     useReview();
   const [selected, setSelected] = useState<HistoryRecord | null>(null);
   const [page, setPage] = useState(1);
@@ -21,10 +21,15 @@ export default function ReviewPage() {
 
   const hasItems = useMemo(() => (data?.items?.length ?? 0) > 0, [data]);
 
-  const handleApprove = async (recordId: string, label: string) => {
-    await approve(recordId, label);
+  const handleApprove = async (recordId: string, labels: Record<string, boolean>) => {
+    await approve(recordId, labels);
     await fetch(page);
     setSelected(null);
+  };
+
+  const handleReject = async (recordId: string) => {
+    await reject(recordId);
+    await fetch(page);
   };
 
   const handleAdvance = async () => {
@@ -108,7 +113,7 @@ export default function ReviewPage() {
         </div>
         {selected && (
           <div className="lg:col-span-1">
-            <ReviewDetail item={selected} onApprove={handleApprove} onClose={() => setSelected(null)} />
+            <ReviewDetail item={selected} onApprove={handleApprove} onReject={handleReject} onClose={() => setSelected(null)} />
           </div>
         )}
       </div>

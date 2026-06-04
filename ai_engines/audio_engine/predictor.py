@@ -89,6 +89,7 @@ class AudioPredictor:
         elif current_samples > target_samples:
             waveform = waveform[:, :target_samples]
 
+        waveform = waveform.to(self.device)
         mel_spec = self.mel_spectrogram(waveform)
         mel_spec_db = self.amplitude_to_db(mel_spec)
 
@@ -96,7 +97,7 @@ class AudioPredictor:
         std = mel_spec_db.std()
         mel_spec_db = (mel_spec_db - mean) / (std + 1e-6)
 
-        mel_np = mel_spec_db.squeeze(0).numpy()
+        mel_np = mel_spec_db.squeeze(0).cpu().numpy()
         mel_img = Image.fromarray(
             ((mel_np - mel_np.min()) / (mel_np.max() - mel_np.min() + 1e-8) * 255).astype(np.uint8)
         ).convert("RGB")

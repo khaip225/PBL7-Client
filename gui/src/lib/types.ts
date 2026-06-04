@@ -13,7 +13,7 @@ export interface ClassProbabilities {
 export interface DiagnosisResult {
   mode: string;
   result: {
-    label: string;
+    labels: string[];         // all detected disease/acoustic classes
     confidence: number;
     threshold: number;
   };
@@ -88,7 +88,7 @@ export interface LogEntry {
 export interface HistoryRecord {
   id: string;
   timestamp: string;
-  label: string;
+  labels: string[];          // multi-label: detected classes
   mode: string;
   audio_file: string | null;
   image_file: string | null;
@@ -119,12 +119,12 @@ export interface AvailableJob {
 export interface ReviewListResponse extends HistoryListResponse {}
 
 export interface ReviewApproveRequest {
-  label: string;
+  labels: Record<string, boolean>;  // class name → true/false
 }
 
 export interface ReviewApproveResponse {
   record_id: string;
-  label: string;
+  labels: Record<string, boolean>;
   audio_dest: string | null;
   image_dest: string | null;
   batch_dir: string;
@@ -160,10 +160,11 @@ export const DISEASE_COLORS: Record<string, string> = {
   Pneumonia: "#ef4444",
   COPD_Emphysema: "#f97316",
   Fibrosis: "#8b5cf6",
-  Normal: "#22c55e",
 };
 export const ACOUSTIC_NAMES = ["Crackle", "Wheeze"];
 export const ACOUSTIC_COLORS: Record<string, string> = {
   Crackle: "#06b6d4",
   Wheeze: "#eab308",
 };
+export const ALL_LABELS = [...DISEASE_NAMES, ...ACOUSTIC_NAMES];
+export const ALL_COLORS: Record<string, string> = { ...DISEASE_COLORS, ...ACOUSTIC_COLORS };

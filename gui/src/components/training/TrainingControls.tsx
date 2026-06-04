@@ -70,7 +70,8 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
     }
   };
 
-  const taskTypeLabel = (t: string) => t === "audio" ? "Âm thanh" : t === "image" ? "Hình ảnh" : t;
+  const taskTypeLabel = (t: string) =>
+    t === "audio" ? "Âm thanh" : t === "image" ? "Hình ảnh" : t === "alignment" ? "Đa phương thức" : t;
 
   return (
     <div className="card space-y-4">
@@ -101,6 +102,7 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
                     <span className="text-sm font-medium text-white">{job.name}</span>
                     <span className={`px-2 py-0.5 rounded text-xs ${
                       job.task_type === "audio" ? "bg-purple-900/30 text-purple-400"
+                        : job.task_type === "alignment" ? "bg-emerald-900/30 text-emerald-400"
                         : "bg-blue-900/30 text-blue-400"
                     }`}>
                       {taskTypeLabel(job.task_type)}
@@ -175,6 +177,7 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
                 >
                   <option value="image">Hình ảnh (X-quang)</option>
                   <option value="audio">Âm thanh (Phổi)</option>
+                  <option value="alignment">Đa phương thức (Alignment)</option>
                 </select>
               </div>
               <div>

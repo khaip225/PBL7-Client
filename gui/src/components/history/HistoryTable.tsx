@@ -1,4 +1,5 @@
 import type { HistoryRecord } from "../../lib/types";
+import { ALL_COLORS } from "../../lib/types";
 
 interface Props {
   items: HistoryRecord[];
@@ -28,34 +29,43 @@ export default function HistoryTable({ items, onSelect, selectedId }: Props) {
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => (
-              <tr
-                key={item.id}
-                onClick={() => onSelect(item)}
-                className={`border-b border-gray-800/50 cursor-pointer transition-colors hover:bg-gray-800/50 ${
-                  selectedId === item.id ? "bg-blue-600/10" : ""
-                }`}
-              >
-                <td className="px-4 py-3 text-gray-300 whitespace-nowrap">
-                  {item.timestamp}
-                </td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      item.label === "normal"
-                        ? "bg-green-600/15 text-green-400"
-                        : "bg-red-600/15 text-red-400"
-                    }`}
-                  >
-                    {item.label}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-gray-400">{item.mode}</td>
-                <td className="px-4 py-3 text-gray-300">
-                  {item.confidence != null ? `${(item.confidence * 100).toFixed(1)}%` : "—"}
-                </td>
-              </tr>
-            ))}
+            {items.map((item) => {
+              const displayLabels = item.labels ?? [];
+              return (
+                <tr
+                  key={item.id}
+                  onClick={() => onSelect(item)}
+                  className={`border-b border-gray-800/50 cursor-pointer transition-colors hover:bg-gray-800/50 ${
+                    selectedId === item.id ? "bg-blue-600/10" : ""
+                  }`}
+                >
+                  <td className="px-4 py-3 text-gray-300 whitespace-nowrap">
+                    {item.timestamp}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {displayLabels.map((label) => (
+                        <span
+                          key={label}
+                          className="rounded-full px-2 py-0.5 text-xs font-medium border"
+                          style={{
+                            backgroundColor: (ALL_COLORS[label] ?? "#6b7280") + "20",
+                            color: ALL_COLORS[label] ?? "#6b7280",
+                            borderColor: (ALL_COLORS[label] ?? "#6b7280") + "40",
+                          }}
+                        >
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-gray-400">{item.mode}</td>
+                  <td className="px-4 py-3 text-gray-300">
+                    {item.confidence != null ? `${(item.confidence * 100).toFixed(1)}%` : "—"}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

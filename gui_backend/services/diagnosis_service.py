@@ -16,7 +16,6 @@ class DiagnosisService:
         timestamp = datetime.now()
         heatmap_path = None
         audio_detail = None
-        confidence = None
 
         if mode == "fusion":
             if not audio_file_path or not image_file_path:
@@ -29,16 +28,20 @@ class DiagnosisService:
             fusion_scores = self.fusion_engine.fuse(
                 audio_result["probabilities"], image_result["probabilities"]
             )
-            primary_disease, conf = self.fusion_engine.get_primary_disease(fusion_scores)
             scores = {
                 "audio_scores": audio_result["probabilities"],
                 "image_scores": image_result["probabilities"],
                 "fusion_scores": fusion_scores,
             }
             heatmap_path = image_result.get("heatmap_path")
-            label = primary_disease
-            conf_pct = round(conf * 100, 1)
-            confidence = conf_pct / 100
+            # Multi-label: collect all classes above threshold
+            labels = self._collect_labels(
+                disease_scores=fusion_scores,
+                acoustic_scores=audio_result["probabilities"],
+            )
+            conf_pct = round(max(
+                [v for v in fusion_scores.values() if isinstance(v, (int, float))] + [0]
+            ) * 100, 1)
 
         elif mode == "audio":
             if not audio_file_path:
@@ -47,14 +50,22 @@ class DiagnosisService:
             audio_detail = {"final_score": audio_result["binary_score"],
                            "probabilities": audio_result["probabilities"],
                            "label": audio_result["label"]}
+
+            # Cross-modal inference: audio → disease probabilities
+            inferred_image = self.fusion_engine.audio_to_disease(audio_result["probabilities"])
+
             scores = {
                 "audio_scores": audio_result["probabilities"],
-                "image_scores": None,
+                "image_scores": inferred_image,
                 "fusion_scores": None,
             }
-            label = audio_result["label"]
-            conf_pct = audio_result["confidence"]
-            confidence = conf_pct / 100
+            labels = self._collect_labels(
+                disease_scores=inferred_image,
+                acoustic_scores=audio_result["probabilities"],
+            )
+            conf_pct = round(max(
+                [v for v in audio_result["probabilities"].values()] + [0]
+            ) * 100, 1)
 
         elif mode == "image":
             if not image_file_path:
@@ -63,24 +74,36 @@ class DiagnosisService:
             image_result = self.image_predictor.predict_with_gradcam(
                 image_file_path, save_dir=heatmap_dir
             )
+
+            # Cross-modal inference: image → acoustic attributes
+            inferred_audio = self.fusion_engine.image_to_acoustic(image_result["probabilities"])
+
             scores = {
-                "audio_scores": None,
+                "audio_scores": inferred_audio,
                 "image_scores": image_result["probabilities"],
                 "fusion_scores": None,
             }
             heatmap_path = image_result.get("heatmap_path")
-            label = image_result["best_class"] if image_result["detected"] else "Normal"
-            conf_pct = round(image_result["best_probability"] * 100, 1)
-            confidence = conf_pct / 100
+            labels = self._collect_labels(
+                disease_scores=image_result["probabilities"],
+                acoustic_scores=inferred_audio,
+            )
+            conf_pct = round(max(
+                [v for v in image_result["probabilities"].values()] + [0]
+            ) * 100, 1)
         else:
             raise ValueError(f"Unknown mode: {mode}")
+
+        # If nothing detected, default to Normal
+        if not labels:
+            labels = ["Normal"]
 
         audio_dest, image_dest = self.storage_manager.save_files(
             audio_file_path,
             image_file_path,
-            label,
+            labels,
             mode=mode,
-            confidence=round(confidence, 1),
+            confidence=conf_pct / 100,
             scores=scores,
         )
 
@@ -93,7 +116,7 @@ class DiagnosisService:
         return {
             "mode": mode,
             "result": {
-                "label": label,
+                "labels": labels,
                 "confidence": conf_pct,
                 "threshold": self.threshold,
             },
@@ -109,3 +132,14 @@ class DiagnosisService:
             "heatmap_path": heatmap_path,
             "timestamp": timestamp.isoformat(),
         }
+
+    def _collect_labels(self, disease_scores: dict, acoustic_scores: dict) -> list[str]:
+        """Collect all disease/acoustic classes with prob >= threshold."""
+        labels = []
+        for name in ["Pneumonia", "COPD_Emphysema", "Fibrosis"]:
+            if disease_scores.get(name, 0) >= self.threshold:
+                labels.append(name)
+        for name in ["Crackle", "Wheeze"]:
+            if acoustic_scores.get(name, 0) >= self.threshold:
+                labels.append(name)
+        return labels

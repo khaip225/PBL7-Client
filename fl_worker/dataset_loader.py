@@ -72,7 +72,6 @@ class FLImageEncoderDataset(Dataset):
     """Multi-label image dataset for encoder training.
 
     Expects CSV columns: path, Normal, Pneumonia, COPD_Emphysema, Fibrosis
-    Falls back to directory scanning (NORMAL→[1,0,0,0], PNEUMONIA→[0,1,0,0]).
     """
 
     def __init__(self, data_dir: str, csv_file: str | None = None,
@@ -82,22 +81,19 @@ class FLImageEncoderDataset(Dataset):
         self.img_size = img_size
         self.class_cols = IMG_CLASS_COLS
 
-        # Try to load from CSV first
+        # CSV is required for multi-label
         if csv_file and os.path.exists(csv_file):
             self.df = pd.read_csv(csv_file)
-            self._use_csv = True
-            # Validate columns
-            for col in self.class_cols:
-                if col not in self.df.columns:
-                    self.df[col] = 0.0
         else:
-            # Fallback: directory scan
-            self.df = None
-            self._use_csv = False
-            self._samples: list[tuple[str, list[float]]] = []
-            self._scan_directories(data_dir)
-            if len(self._samples) == 0:
-                print(f"[WARNING] No images found in {data_dir}")
+            raise FileNotFoundError(
+                f"Multi-label image CSV not found: {csv_file}. "
+                f"Run diagnosis + review first to generate labeled data."
+            )
+
+        # Validate columns
+        for col in self.class_cols:
+            if col not in self.df.columns:
+                self.df[col] = 0.0
 
         # Transforms
         if is_train:
@@ -115,34 +111,17 @@ class FLImageEncoderDataset(Dataset):
                 transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
             ])
 
-    def _scan_directories(self, data_dir: str):
-        """Scan NORMAL/ and PNEUMONIA/ subdirectories."""
-        for label_name, label_vec in [
-            ("NORMAL",    [1.0, 0.0, 0.0, 0.0]),
-            ("PNEUMONIA", [0.0, 1.0, 0.0, 0.0]),
-        ]:
-            folder = os.path.join(data_dir, label_name)
-            if not os.path.isdir(folder):
-                continue
-            for fname in os.listdir(folder):
-                if fname.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp')):
-                    self._samples.append((os.path.join(folder, fname), label_vec))
-
     def __len__(self) -> int:
-        return len(self.df) if self._use_csv else len(self._samples)
+        return len(self.df)
 
     def __getitem__(self, idx: int):
         try:
-            if self._use_csv:
-                row = self.df.iloc[idx]
-                img_path = str(row["path"])
-                labels = torch.tensor(
-                    [float(row.get(c, 0)) for c in self.class_cols],
-                    dtype=torch.float32,
-                )
-            else:
-                img_path, label_list = self._samples[idx]
-                labels = torch.tensor(label_list, dtype=torch.float32)
+            row = self.df.iloc[idx]
+            img_path = str(row["path"])
+            labels = torch.tensor(
+                [float(row.get(c, 0)) for c in self.class_cols],
+                dtype=torch.float32,
+            )
 
             image = Image.open(img_path).convert("RGB")
             image = self.transform(image)
@@ -423,17 +402,16 @@ def _build_loader(dataset: Dataset, batch_size: int, is_train: bool) -> DataLoad
 
 def _compute_sample_weights(dataset: Dataset) -> list[float]:
     """Compute per-sample weights based on inverse class frequency."""
-    if hasattr(dataset, '_use_csv') and dataset._use_csv and dataset.df is not None:
+    # Image dataset (FLImageEncoderDataset) — always has df and class_cols
+    if hasattr(dataset, 'class_cols') and hasattr(dataset, 'df') and dataset.df is not None:
         df = dataset.df
-        freqs = np.array([float(df[c].sum()) for c in dataset.class_cols])
-    elif hasattr(dataset, '_samples') and not getattr(dataset, '_use_csv', True):
-        labels_arr = np.array([s[1] for s in dataset._samples])
-        freqs = labels_arr.sum(axis=0)
+        class_cols = dataset.class_cols
+        freqs = np.array([float(df[c].sum()) for c in class_cols])
     elif hasattr(dataset, 'df') and dataset.df is not None:
-        # Audio dataset
+        # Audio dataset (FLAudioEncoderDataset)
         df = dataset.df
-        if dataset._label_mode == "multi":
-            freqs = np.array([float(df.get(c, pd.Series([0]*len(df))).sum())
+        if hasattr(dataset, '_label_mode') and dataset._label_mode == "multi":
+            freqs = np.array([float(df.get(c, pd.Series([0] * len(df))).sum())
                               for c in AUD_CLASS_COLS])
         else:
             freqs = np.array([len(df)] * 3)
@@ -443,18 +421,23 @@ def _compute_sample_weights(dataset: Dataset) -> list[float]:
     freqs = np.maximum(freqs, 1.0)
     class_weights = 1.0 / freqs
 
-    if hasattr(dataset, '_use_csv') and dataset._use_csv and dataset.df is not None:
+    # Image dataset weighting
+    if hasattr(dataset, 'class_cols') and hasattr(dataset, 'df') and dataset.df is not None:
         weights = []
         for _, row in dataset.df.iterrows():
             ws = [class_weights[i] for i, c in enumerate(dataset.class_cols) if float(row.get(c, 0)) > 0.5]
             weights.append(np.mean(ws) if ws else 1.0)
         return weights
-    elif hasattr(dataset, '_samples') and not getattr(dataset, '_use_csv', True):
-        labels_arr = np.array([s[1] for s in dataset._samples])
+
+    # Audio dataset weighting
+    if hasattr(dataset, 'df') and dataset.df is not None:
         weights = []
-        for lbl in labels_arr:
-            ws = [class_weights[i] for i, v in enumerate(lbl) if v > 0.5]
-            weights.append(np.mean(ws) if ws else 1.0)
+        for _, row in dataset.df.iterrows():
+            if hasattr(dataset, '_label_mode') and dataset._label_mode == "multi":
+                ws = [class_weights[i] for i, c in enumerate(AUD_CLASS_COLS) if float(row.get(c, 0)) > 0.5]
+                weights.append(np.mean(ws) if ws else 1.0)
+            else:
+                weights.append(1.0)
         return weights
 
     return [1.0] * len(dataset)

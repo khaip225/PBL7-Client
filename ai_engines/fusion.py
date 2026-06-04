@@ -13,6 +13,42 @@ class OntologyFusion:
     def __init__(self, audio_weight=0.4):
         self.w_audio = audio_weight
 
+    # ── ontology rules ──────────────────────────────────────────────
+    # Crackle → Pneumonia + Fibrosis
+    # Wheeze  → COPD / Emphysema
+
+    def audio_to_disease(self, audio_probs: dict) -> dict:
+        """Infer disease probabilities from acoustic attributes (reverse ontology).
+
+        Used when only audio is available (audio-only mode).
+        """
+        crackle = audio_probs.get("Crackle", 0)
+        wheeze = audio_probs.get("Wheeze", 0)
+
+        return {
+            "Pneumonia": round(crackle * self.w_audio, 4),
+            "COPD_Emphysema": round(wheeze * self.w_audio, 4),
+            "Fibrosis": round(crackle * self.w_audio * 0.5, 4),
+        }
+
+    def image_to_acoustic(self, image_probs: dict) -> dict:
+        """Infer acoustic attributes from disease probabilities (reverse ontology).
+
+        Used when only an X-ray is available (image-only mode).
+        """
+        pneumonia = image_probs.get("Pneumonia", 0)
+        copd = image_probs.get("COPD_Emphysema", 0)
+        fibrosis = image_probs.get("Fibrosis", 0)
+
+        # Pneumonia + Fibrosis both imply crackle; take the stronger signal
+        crackle = max(pneumonia, fibrosis * 0.5)
+        wheeze = copd
+
+        return {
+            "Crackle": round(crackle, 4),
+            "Wheeze": round(wheeze, 4),
+        }
+
     def fuse(self, audio_probs: dict, image_probs: dict) -> dict:
         crackle = audio_probs.get("Crackle", 0)
         wheeze = audio_probs.get("Wheeze", 0)

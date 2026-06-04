@@ -189,7 +189,7 @@ class FastAPIClient:
                         "gpu_percent": metrics.get("gpu_percent", 0),
                         "gpu_temp": metrics.get("gpu_temp"),
                     },
-                    "task_type": self._state.get("modality"),
+                    "task_type": self._state.get("modality").replace("multimodal", "alignment"),
                     "dataset_info": self._state.get("dataset_info", {}),
                 }
                 resp = self._session.post(
