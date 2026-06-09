@@ -2,8 +2,40 @@
 
 import os
 from fastapi import APIRouter, HTTPException, Request, Query
+from fastapi.responses import FileResponse
 
 router = APIRouter()
+
+# ── Serve retrieval file (ảnh hoặc audio) ──────────────────────────────────
+
+@router.get("/api/retrieval/file")
+async def serve_retrieval_file(
+    request: Request,
+    path: str = Query(..., description="Absolute path to file"),
+):
+    """Serve ảnh hoặc audio từ database retrieval để hiển thị trực tiếp trên UI."""
+    if not os.path.isfile(path):
+        raise HTTPException(404, f"File not found: {path}")
+
+    ext = os.path.splitext(path)[1].lower()
+    if ext in (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"):
+        media_type = f"image/{ext.lstrip('.')}"
+        if ext == ".jpg":
+            media_type = "image/jpeg"
+        elif ext == ".tiff":
+            media_type = "image/tiff"
+        return FileResponse(path, media_type=media_type)
+    elif ext in (".wav", ".mp3", ".flac", ".ogg", ".m4a"):
+        media_type = f"audio/{ext.lstrip('.')}"
+        if ext == ".mp3":
+            media_type = "audio/mpeg"
+        elif ext == ".ogg":
+            media_type = "audio/ogg"
+        elif ext == ".m4a":
+            media_type = "audio/mp4"
+        return FileResponse(path, media_type=media_type)
+    else:
+        raise HTTPException(400, f"Unsupported file type: {ext}")
 
 
 @router.post("/api/retrieval/audio-to-image")

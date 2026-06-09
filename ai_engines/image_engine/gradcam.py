@@ -1,8 +1,3 @@
-"""
-Grad-CAM: hiển thị vùng ảnh X-quang mà model "chú ý" khi ra quyết định.
-Dùng cho ResNet18 (binary) và sau này EfficientNet (multi-label).
-"""
-
 import numpy as np
 import cv2
 from PIL import Image

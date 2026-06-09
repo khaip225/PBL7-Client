@@ -10,6 +10,32 @@ export interface ClassProbabilities {
   [className: string]: number;
 }
 
+/** Kết quả cross-modal zero-shot (HĐ2) */
+export interface CrossModalResult {
+  scores: ClassProbabilities;   // acoustic hoặc disease probabilities
+  message: string;              // cảnh báo cho bác sĩ
+}
+
+/** Một mục retrieval (HĐ3) */
+export interface RetrievalItem {
+  file_path: string;
+  file_name: string;
+  similarity: number;
+  case_id: string;
+  disease_label: string;
+  acoustic_label: string;
+}
+
+/** Kết quả late fusion (HĐ5) */
+export interface LateFusionResultDetail {
+  primary_diagnosis: string;
+  confidence: number;
+  confidence_level: string;   // "Rất cao" / "Cao" / "Trung bình" / "Thấp"
+  agreement: string;
+  fusion_scores: ClassProbabilities;
+  is_normal: boolean;
+}
+
 export interface DiagnosisResult {
   mode: string;
   result: {
@@ -30,6 +56,11 @@ export interface DiagnosisResult {
     image_dest: string | null;
   };
   heatmap_path: string | null;
+  // ── 5-Action Pipeline ──────────────────────────────────────────
+  cross_modal: CrossModalResult | null;           // HĐ2
+  retrieval: RetrievalItem[];                      // HĐ3
+  late_fusion: LateFusionResultDetail | null;      // HĐ5
+  attention_map_path: string | null;               // HĐ4 (audio)
   timestamp: string;
 }
 

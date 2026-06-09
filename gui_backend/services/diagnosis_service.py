@@ -1,102 +1,176 @@
+"""Diagnosis Service — sử dụng PipelineEngine cho pipeline 5 hành động."""
+
 import json
 import os
 from datetime import datetime
+
 from config import config
 
 
 class DiagnosisService:
-    def __init__(self, audio_predictor, image_predictor, fusion_engine, storage_manager):
-        self.audio_predictor = audio_predictor
-        self.image_predictor = image_predictor
-        self.fusion_engine = fusion_engine
+    """Điều phối chẩn đoán qua PipelineEngine (5 hành động)."""
+
+    def __init__(self, pipeline_engine, storage_manager):
+        self.engine = pipeline_engine
         self.storage_manager = storage_manager
         self.threshold = config.PREDICTION_THRESHOLD
 
     def run(self, mode: str, audio_file_path: str | None, image_file_path: str | None) -> dict:
         timestamp = datetime.now()
-        heatmap_path = None
-        audio_detail = None
 
         if mode == "fusion":
             if not audio_file_path or not image_file_path:
                 raise ValueError("Fusion mode requires both audio and image files")
-            audio_result = self.audio_predictor.predict_with_label(audio_file_path)
-            audio_detail = {"final_score": audio_result["binary_score"],
-                           "probabilities": audio_result["probabilities"],
-                           "label": audio_result["label"]}
-            image_result = self.image_predictor.predict_with_gradcam(image_file_path)
-            fusion_scores = self.fusion_engine.fuse(
-                audio_result["probabilities"], image_result["probabilities"]
-            )
-            scores = {
-                "audio_scores": audio_result["probabilities"],
-                "image_scores": image_result["probabilities"],
-                "fusion_scores": fusion_scores,
-            }
-            heatmap_path = image_result.get("heatmap_path")
-            # Multi-label: collect all classes above threshold
-            labels = self._collect_labels(
-                disease_scores=fusion_scores,
-                acoustic_scores=audio_result["probabilities"],
-            )
-            conf_pct = round(max(
-                [v for v in fusion_scores.values() if isinstance(v, (int, float))] + [0]
-            ) * 100, 1)
 
-        elif mode == "audio":
-            if not audio_file_path:
-                raise ValueError("Audio mode requires an audio file")
-            audio_result = self.audio_predictor.predict_with_label(audio_file_path)
-            audio_detail = {"final_score": audio_result["binary_score"],
-                           "probabilities": audio_result["probabilities"],
-                           "label": audio_result["label"]}
+            # Chạy cả 2 pipeline
+            heatmap_dir = os.path.join(self.storage_manager.client_dir, "heatmaps") \
+                if hasattr(self.storage_manager, 'client_dir') \
+                else os.path.join(self.storage_manager.pending_dir, "heatmaps")
+            attention_dir = os.path.join(self.storage_manager.client_dir, "attention") \
+                if hasattr(self.storage_manager, 'client_dir') \
+                else os.path.join(self.storage_manager.pending_dir, "attention")
 
-            # Cross-modal inference: audio → disease probabilities
-            inferred_image = self.fusion_engine.audio_to_disease(audio_result["probabilities"])
+            img_result = self.engine.run_image_pipeline(
+                image_file_path, save_heatmap_dir=heatmap_dir
+            )
+            aud_result = self.engine.run_audio_pipeline(
+                audio_file_path, save_attention_dir=attention_dir
+            )
+
+            # Kết hợp scores từ cả 2 pipeline
+            disease_probs = img_result.disease_probs
+            acoustic_probs = aud_result.acoustic_probs
+
+            # Late fusion kết hợp
+            late_fusion = self.engine.late_fusion(disease_probs, acoustic_probs)
 
             scores = {
-                "audio_scores": audio_result["probabilities"],
-                "image_scores": inferred_image,
-                "fusion_scores": None,
+                "audio_scores": acoustic_probs,
+                "image_scores": disease_probs,
+                "fusion_scores": late_fusion.fusion_scores,
             }
-            labels = self._collect_labels(
-                disease_scores=inferred_image,
-                acoustic_scores=audio_result["probabilities"],
-            )
-            conf_pct = round(max(
-                [v for v in audio_result["probabilities"].values()] + [0]
-            ) * 100, 1)
+            heatmap_path = img_result.heatmap_path
+            attention_path = aud_result.attention_map_path
+            cross_modal = None
+            retrieval = img_result.retrieved_audio + aud_result.retrieved_images
+
+            labels = self._collect_labels(disease_probs, acoustic_probs)
+            conf_pct = round(late_fusion.confidence * 100, 1)
+
+            audio_detail = {
+                "final_score": max(acoustic_probs.values()) if acoustic_probs else 0,
+                "probabilities": acoustic_probs,
+                "label": max(acoustic_probs, key=acoustic_probs.get) if acoustic_probs else "Normal",
+            }
 
         elif mode == "image":
             if not image_file_path:
                 raise ValueError("Image mode requires an image file")
-            heatmap_dir = os.path.join(self.storage_manager.client_dir, "heatmaps") if hasattr(self.storage_manager, 'client_dir') else os.path.join(self.storage_manager.pending_dir, "heatmaps")
-            image_result = self.image_predictor.predict_with_gradcam(
-                image_file_path, save_dir=heatmap_dir
+
+            heatmap_dir = os.path.join(self.storage_manager.client_dir, "heatmaps") \
+                if hasattr(self.storage_manager, 'client_dir') \
+                else os.path.join(self.storage_manager.pending_dir, "heatmaps")
+
+            result = self.engine.run_image_pipeline(
+                image_file_path, save_heatmap_dir=heatmap_dir
             )
 
-            # Cross-modal inference: image → acoustic attributes
-            inferred_audio = self.fusion_engine.image_to_acoustic(image_result["probabilities"])
+            disease_probs = result.disease_probs
+            acoustic_probs = result.cross_modal_acoustic
+            late_fusion = result.late_fusion
 
             scores = {
-                "audio_scores": inferred_audio,
-                "image_scores": image_result["probabilities"],
-                "fusion_scores": None,
+                "audio_scores": result.cross_modal_acoustic,
+                "image_scores": result.disease_probs,
+                "fusion_scores": late_fusion.fusion_scores if late_fusion else None,
             }
-            heatmap_path = image_result.get("heatmap_path")
-            labels = self._collect_labels(
-                disease_scores=image_result["probabilities"],
-                acoustic_scores=inferred_audio,
+            heatmap_path = result.heatmap_path
+            attention_path = None
+            cross_modal = {
+                "scores": result.cross_modal_acoustic,
+                "message": result.cross_modal_message,
+            }
+            retrieval = [
+                {
+                    "file_path": r.file_path,
+                    "file_name": r.file_name,
+                    "similarity": r.similarity,
+                    "case_id": r.case_id,
+                    "disease_label": r.disease_label,
+                    "acoustic_label": r.acoustic_label,
+                }
+                for r in result.retrieved_audio
+            ]
+
+            labels = self._collect_labels(disease_probs, acoustic_probs)
+            conf_pct = round(late_fusion.confidence * 100, 1) if late_fusion else round(max(disease_probs.values()) * 100, 1)
+            audio_detail = None
+
+        elif mode == "audio":
+            if not audio_file_path:
+                raise ValueError("Audio mode requires an audio file")
+
+            attention_dir = os.path.join(self.storage_manager.client_dir, "attention") \
+                if hasattr(self.storage_manager, 'client_dir') \
+                else os.path.join(self.storage_manager.pending_dir, "attention")
+
+            result = self.engine.run_audio_pipeline(
+                audio_file_path, save_attention_dir=attention_dir
             )
-            conf_pct = round(max(
-                [v for v in image_result["probabilities"].values()] + [0]
-            ) * 100, 1)
+
+            acoustic_probs = result.acoustic_probs
+            disease_probs = result.cross_modal_disease
+            late_fusion = result.late_fusion
+
+            scores = {
+                "audio_scores": result.acoustic_probs,
+                "image_scores": result.cross_modal_disease,
+                "fusion_scores": late_fusion.fusion_scores if late_fusion else None,
+            }
+            heatmap_path = None
+            attention_path = result.attention_map_path
+            cross_modal = {
+                "scores": result.cross_modal_disease,
+                "message": result.cross_modal_message,
+            }
+            retrieval = [
+                {
+                    "file_path": r.file_path,
+                    "file_name": r.file_name,
+                    "similarity": r.similarity,
+                    "case_id": r.case_id,
+                    "disease_label": r.disease_label,
+                    "acoustic_label": r.acoustic_label,
+                }
+                for r in result.retrieved_images
+            ]
+
+            labels = self._collect_labels(disease_probs, acoustic_probs)
+            conf_pct = round(late_fusion.confidence * 100, 1) if late_fusion else round(max(acoustic_probs.values()) * 100, 1)
+            audio_detail = {
+                "final_score": max(acoustic_probs.values()) if acoustic_probs else 0,
+                "probabilities": acoustic_probs,
+                "label": max(acoustic_probs, key=acoustic_probs.get) if acoustic_probs else "Normal",
+            }
+
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
         # If nothing detected, default to Normal
         if not labels:
             labels = ["Normal"]
+
+        # Late fusion detail
+        lf_detail = None
+        if late_fusion:
+            lf_detail = {
+                "primary_diagnosis": late_fusion.primary_diagnosis,
+                "confidence": late_fusion.confidence,
+                "confidence_level": late_fusion.confidence_level,
+                "agreement": late_fusion.agreement,
+                "fusion_scores": late_fusion.fusion_scores,
+                "is_normal": late_fusion.is_normal,
+            }
 
         audio_dest, image_dest = self.storage_manager.save_files(
             audio_file_path,
@@ -107,7 +181,7 @@ class DiagnosisService:
             scores=scores,
         )
 
-        # Save audio detail JSON alongside the audio file
+        # Save audio detail JSON
         if audio_dest and audio_detail is not None:
             json_path = os.path.splitext(audio_dest)[0] + ".json"
             with open(json_path, "w", encoding="utf-8") as f:
@@ -130,6 +204,10 @@ class DiagnosisService:
                 "image_dest": image_dest,
             },
             "heatmap_path": heatmap_path,
+            "cross_modal": cross_modal,
+            "retrieval": retrieval,
+            "late_fusion": lf_detail,
+            "attention_map_path": attention_path,
             "timestamp": timestamp.isoformat(),
         }
 

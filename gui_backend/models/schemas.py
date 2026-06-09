@@ -30,12 +30,42 @@ class SavedPaths(BaseModel):
     image_dest: str | None = None
 
 
+# ── 5-Action Pipeline Response Types ──────────────────────────────────────
+
+class RetrievalItem(BaseModel):
+    file_path: str
+    file_name: str
+    similarity: float
+    case_id: str = ""
+    disease_label: str = ""
+    acoustic_label: str = ""
+
+
+class CrossModalResult(BaseModel):
+    scores: dict          # acoustic hoặc disease probabilities
+    message: str          # cảnh báo cho bác sĩ
+
+
+class LateFusionResultDetail(BaseModel):
+    primary_diagnosis: str
+    confidence: float
+    confidence_level: str   # "Rất cao" / "Cao" / "Trung bình" / "Thấp"
+    agreement: str
+    fusion_scores: dict
+    is_normal: bool
+
+
 class DiagnosisResponse(BaseModel):
     mode: str
     result: DiagnosisResult
     scores: ScoreDetail
     saved: SavedPaths
     heatmap_path: str | None = None
+    # ── 5-Action Pipeline fields ─────────────────────────────────────
+    cross_modal: CrossModalResult | None = None       # HĐ2
+    retrieval: list[RetrievalItem] = []               # HĐ3
+    late_fusion: LateFusionResultDetail | None = None  # HĐ5
+    attention_map_path: str | None = None             # HĐ4 (audio)
     timestamp: str
 
 

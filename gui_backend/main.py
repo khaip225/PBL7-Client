@@ -5,15 +5,13 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Ensure PBL7-Client is on the path
+# ── Path setup ──────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from config import config
-from ai_engines.audio_engine.predictor import AudioPredictor
-from ai_engines.image_engine.predictor import ImagePredictor
-from ai_engines.fusion import OntologyFusion
+from ai_engines.pipeline_engine import PipelineEngine
 from local_managers.storage_manager import StorageManager
 from local_managers.data_sync_manager import DataSyncManager
 from gui_backend.services.diagnosis_service import DiagnosisService
@@ -30,75 +28,76 @@ from gui_backend.api.retrieval import router as retrieval_router
 from gui_backend.api.tsne import router as tsne_router
 from fl_worker.api_client import api_client
 
-AUDIO_MODEL = os.path.join(BASE_DIR, "ai_engines", "current_weights", "best_global_audio.pth")
-IMAGE_MODEL = os.path.join(BASE_DIR, "ai_engines", "current_weights", "best_global_image.pth")
+# ── Model paths ─────────────────────────────────────────────────────────────
+STAGE4_PATH = os.path.join(BASE_DIR, "models", "stage4_best_model.pth")
+IMAGE_HEAD_PATH = os.path.join(BASE_DIR, "models", "Global_Image_best.pth")
+AUDIO_HEAD_PATH = os.path.join(BASE_DIR, "models", "Global_Audio_best.pth")
+
+# Database paths (optional — created by scripts/build_database.py)
+AUDIO_DB_PATH = os.path.join(BASE_DIR, "Local_Data", "databases", "audio_database.npy")
+IMAGE_DB_PATH = os.path.join(BASE_DIR, "Local_Data", "databases", "image_database.npy")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("[GUI Backend] Initializing AI models...")
-    app.state.audio_model_path = AUDIO_MODEL
-    app.state.image_model_path = IMAGE_MODEL
-    app.state.client_name = config.CLIENT_NAME
-    app.state.client_id = None
+    """Khởi tạo PipelineEngine và các services."""
+    print("[GUI Backend] Initializing PipelineEngine...")
 
-    audio_predictor = AudioPredictor(AUDIO_MODEL, threshold=config.PREDICTION_THRESHOLD)
-    image_predictor = ImagePredictor(IMAGE_MODEL)
-    fusion_engine = OntologyFusion(audio_weight=0.4)
+    device = "cuda" if __import__('torch').cuda.is_available() else "cpu"
+    print(f"[GUI Backend] Device: {device}")
+
+    # ── PipelineEngine ───────────────────────────────────────────────────
+    pipeline = PipelineEngine(
+        stage4_path=STAGE4_PATH,
+        image_head_path=IMAGE_HEAD_PATH,
+        audio_head_path=AUDIO_HEAD_PATH,
+        audio_db_path=AUDIO_DB_PATH if os.path.exists(AUDIO_DB_PATH) else None,
+        image_db_path=IMAGE_DB_PATH if os.path.exists(IMAGE_DB_PATH) else None,
+        device=device,
+        threshold=config.PREDICTION_THRESHOLD,
+    )
+    app.state.pipeline_engine = pipeline
+    print("[GUI Backend] PipelineEngine initialized")
+
+    # ── Storage & Sync ───────────────────────────────────────────────────
     storage_manager = StorageManager(client_id=config.CLIENT_ID)
     data_sync_manager = DataSyncManager(client_id=config.CLIENT_ID)
 
-    app.state.diagnosis_service = DiagnosisService(
-        audio_predictor, image_predictor, fusion_engine, storage_manager
-    )
+    # ── Diagnosis Service (dùng PipelineEngine) ─────────────────────────
+    app.state.diagnosis_service = DiagnosisService(pipeline, storage_manager)
+
+    # ── Training ─────────────────────────────────────────────────────────
     app.state.training_service = TrainingService()
+
+    # ── History & Review ─────────────────────────────────────────────────
     app.state.history_service = HistoryService()
-    app.state.review_service = ReviewService(app.state.history_service, data_sync_manager)
+    app.state.review_service = ReviewService(app.state.history_service, data_sync_manager, pipeline)
 
-    # Cross-modal retrieval service (optional prototype model)
-    retrieval_svc = None
-    try:
-        from shared.prototype_fl_model import FLPrototypeModel
-
-        _server_flower = os.path.join(BASE_DIR, "..", "PBL7-Server", "flower_server")
-        _img_ckpt = os.path.join(_server_flower, "pretrained_xray_multilabel.pth")
-        _aud_ckpt = os.path.join(_server_flower, "pretrained_audio_multilabel.pth")
-
-        if os.path.exists(_img_ckpt) and os.path.exists(_aud_ckpt):
-            proto_model = FLPrototypeModel(
-                image_pretrained_path=_img_ckpt,
-                audio_pretrained_path=_aud_ckpt,
-            )
-            retrieval_svc = RetrievalService(
-                audio_predictor, image_predictor, storage_manager,
-                prototype_model=proto_model,
-            )
-            print("[GUI Backend] Retrieval service initialized with prototype model")
-        else:
-            retrieval_svc = RetrievalService(
-                audio_predictor, image_predictor, storage_manager,
-            )
-            print("[GUI Backend] Retrieval service initialized (fallback mode, no prototype model)")
-    except Exception as e:
-        retrieval_svc = RetrievalService(
-            audio_predictor, image_predictor, storage_manager,
-        )
-        print(f"[GUI Backend] Retrieval service initialized (fallback mode): {e}")
-
+    # ── Retrieval Service (dùng PipelineEngine) ─────────────────────────
+    retrieval_svc = RetrievalService(pipeline, storage_manager)
     app.state.retrieval_service = retrieval_svc
+    print("[GUI Backend] Retrieval service initialized")
 
-    # Connect to VPS server (register + start heartbeat)
-    print("[GUI Backend] Connecting to VPS server...")
-    try:
-        client_uuid = api_client.register()
-        if client_uuid:
-            app.state.client_id = str(client_uuid)
-            api_client.start_heartbeat()
-            print(f"[GUI Backend] Connected to VPS as {client_uuid}")
-        else:
-            print("[GUI Backend] WARNING: Could not register with VPS — continuing offline")
-    except Exception as e:
-        print(f"[GUI Backend] WARNING: VPS connection failed: {e}")
+    # ── Model path info ──────────────────────────────────────────────────
+    app.state.audio_model_path = STAGE4_PATH
+    app.state.image_model_path = STAGE4_PATH
+    app.state.client_name = config.CLIENT_NAME
+    app.state.client_id = None
+
+    # ── Connect to VPS server (background, không chặn startup) ───────────
+    import threading
+    def _connect_vps():
+        try:
+            client_uuid = api_client.register()
+            if client_uuid:
+                app.state.client_id = str(client_uuid)
+                api_client.start_heartbeat()
+                print(f"[GUI Backend] Connected to VPS as {client_uuid}")
+            else:
+                print("[GUI Backend] WARNING: Could not register with VPS — continuing offline")
+        except Exception as e:
+            print(f"[GUI Backend] WARNING: VPS not available — running in offline mode")
+    threading.Thread(target=_connect_vps, daemon=True, name="vps-connect").start()
 
     print("[GUI Backend] Ready.")
     yield
@@ -110,7 +109,6 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
-    # Notify VPS that we're going offline
     try:
         api_client.shutdown()
         print("[GUI Backend] Sent offline notification to VPS")
@@ -135,7 +133,6 @@ app.include_router(history_router)
 app.include_router(review_router)
 app.include_router(retrieval_router)
 app.include_router(tsne_router)
-
 
 if __name__ == "__main__":
     import uvicorn
