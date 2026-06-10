@@ -1,14 +1,15 @@
+"""AudioPredictor — dùng AST mô hình thực sự với mel-spectrogram [1, T, F]."""
+
 import torch
 import torchaudio
 import torch.nn.functional as F
 import numpy as np
 import soundfile as sf
-from PIL import Image
 
 from config import config
 
 
-ACOUSTIC_CLASS_NAMES = ["Crackle", "Wheeze"]
+ACOUSTIC_CLASS_NAMES = ["normal", "crackle", "wheeze"]
 
 
 class AudioPredictor:
@@ -18,19 +19,17 @@ class AudioPredictor:
         self.threshold = threshold if threshold is not None else config.PREDICTION_THRESHOLD
 
         from ai_engines.audio_engine.ast_model import ASTMultiLabel
-        self.model = ASTMultiLabel(num_classes=2).to(self.device)
+        self.model = ASTMultiLabel(num_classes=3).to(self.device)
         self._load_model()
 
         self.target_sr = 16000
-        self.chunk_duration = config.AUDIO_CHUNK_DURATION if hasattr(config, 'AUDIO_CHUNK_DURATION') else 15
-        self.overlap = config.AUDIO_CHUNK_OVERLAP if hasattr(config, 'AUDIO_CHUNK_OVERLAP') else 0.0
-        self.max_length = 15
+        self.max_duration = 15
         self.n_mels = 128
+        self.max_frames = 384
 
-        self.mel_spectrogram = torchaudio.transforms.MelSpectrogram(
-            sample_rate=self.target_sr, n_fft=1024, hop_length=512, n_mels=self.n_mels
-        ).to(self.device)
-        self.amplitude_to_db = torchaudio.transforms.AmplitudeToDB().to(self.device)
+        self.mel_transform = torchaudio.transforms.MelSpectrogram(
+            sample_rate=self.target_sr, n_fft=1024, hop_length=512, n_mels=self.n_mels,
+        )
 
     def _load_model(self):
         try:
@@ -44,7 +43,9 @@ class AudioPredictor:
             print(f"[AudioPredictor] Failed to load model: {e}, using random weights")
             self.model.eval()
 
-    def _load_audio(self, audio_path: str) -> torch.Tensor:
+    def preprocess(self, audio_path):
+        """Match Stage 5 / Stage 4 notebook: waveform → mel-spec z-score → tensor [1, T, F]."""
+        # Load audio
         try:
             waveform, sr = torchaudio.load(audio_path)
         except Exception:
@@ -62,53 +63,23 @@ class AudioPredictor:
             resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.target_sr)
             waveform = resampler(waveform)
 
-        return waveform
-
-    def preprocess(self, audio_path):
-        """AST preprocessing: mel -> Image -> ViT input."""
-        waveform_np, sr = sf.read(audio_path)
-        waveform = torch.from_numpy(waveform_np).float()
-
-        if waveform.ndim == 1:
-            waveform = waveform.unsqueeze(0)
-        elif waveform.ndim == 2:
-            waveform = waveform.transpose(0, 1)
-
-        if waveform.shape[0] > 1:
-            waveform = torch.mean(waveform, dim=0, keepdim=True)
-
-        if sr != self.target_sr:
-            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.target_sr)
-            waveform = resampler(waveform)
-
-        target_samples = self.target_sr * self.max_length
-        current_samples = waveform.shape[1]
-        if current_samples < target_samples:
-            padding = target_samples - current_samples
-            waveform = F.pad(waveform, (0, padding))
-        elif current_samples > target_samples:
+        target_samples = self.target_sr * self.max_duration
+        current = waveform.shape[1]
+        if current < target_samples:
+            waveform = F.pad(waveform, (0, target_samples - current))
+        else:
             waveform = waveform[:, :target_samples]
 
-        waveform = waveform.to(self.device)
-        mel_spec = self.mel_spectrogram(waveform)
-        mel_spec_db = self.amplitude_to_db(mel_spec)
+        # Mel-spectrogram
+        mel_spec = self.mel_transform(waveform)  # (1, 128, T)
+        mel_spec = (mel_spec - mel_spec.mean()) / (mel_spec.std() + 1e-6)
 
-        mean = mel_spec_db.mean()
-        std = mel_spec_db.std()
-        mel_spec_db = (mel_spec_db - mean) / (std + 1e-6)
+        if mel_spec.shape[-1] < self.max_frames:
+            mel_spec = F.pad(mel_spec, (0, self.max_frames - mel_spec.shape[-1]))
+        else:
+            mel_spec = mel_spec[:, :, :self.max_frames]
 
-        mel_np = mel_spec_db.squeeze(0).cpu().numpy()
-        mel_img = Image.fromarray(
-            ((mel_np - mel_np.min()) / (mel_np.max() - mel_np.min() + 1e-8) * 255).astype(np.uint8)
-        ).convert("RGB")
-        mel_img = mel_img.resize((224, 224), Image.BICUBIC)
-
-        from torchvision import transforms
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-        ])
-        return transform(mel_img).unsqueeze(0).to(self.device)
+        return mel_spec.float().to(self.device)  # (1, 128, 384)
 
     def predict(self, audio_path):
         """Tra ve multi-label acoustic probabilities."""
@@ -118,14 +89,16 @@ class AudioPredictor:
             logits = self.model(tensor)
             probs = torch.sigmoid(logits).squeeze(0)
         return {
-            "Crackle": round(probs[0].item(), 4),
-            "Wheeze": round(probs[1].item(), 4),
+            "normal": round(probs[0].item(), 4),
+            "Crackle": round(probs[1].item(), 4),
+            "Wheeze": round(probs[2].item(), 4),
         }
 
     def predict_with_label(self, audio_path):
-        probs = self.predict(audio_path)
-        crackle_p = probs["Crackle"]
-        wheeze_p = probs["Wheeze"]
+        probs_dict = self.predict(audio_path)
+        crackle_p = probs_dict["Crackle"]
+        wheeze_p = probs_dict["Wheeze"]
+        normal_p = probs_dict["normal"]
         binary_score = max(crackle_p, wheeze_p)
 
         detected = binary_score >= self.threshold
@@ -140,12 +113,14 @@ class AudioPredictor:
             label = "Normal"
 
         return {
-            "probabilities": probs,
+            "probabilities": probs_dict,
             "crackle_prob": crackle_p,
             "wheeze_prob": wheeze_p,
+            "normal_prob": normal_p,
             "binary_score": binary_score,
             "label": label,
             "confidence": round(binary_score * 100, 1) if detected else round((1 - binary_score) * 100, 1),
             "threshold": self.threshold,
             "detected": detected,
         }
+

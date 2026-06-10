@@ -1,6 +1,8 @@
 import torch
 from torchvision import transforms
 from PIL import Image
+import cv2
+import numpy as np
 import os
 import sys
 import time
@@ -10,7 +12,7 @@ from ai_engines.image_engine.densenet121_model import DenseNet121MultiLabel
 from ai_engines.image_engine.gradcam import GradCAM
 
 
-CLASS_NAMES = ["Pneumonia", "COPD_Emphysema", "Fibrosis"]
+CLASS_NAMES = ["Normal", "Pneumonia", "COPD_Emphysema", "Fibrosis"]
 
 
 class ImagePredictor:
@@ -18,15 +20,15 @@ class ImagePredictor:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model_path = model_path
         self.threshold = threshold
-        self.model = DenseNet121MultiLabel(num_classes=3)
+        self.model = DenseNet121MultiLabel(num_classes=4)
         self.load_model()
         self.model.to(self.device)
         self.model.eval()
 
+        # Match Stage 5 notebook: NO ImageNet normalization
         self.transform = transforms.Compose([
             transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            transforms.ToTensor(),  # [0,1]
         ])
 
         target_layer = self.model.encoder.features.denseblock4.denselayer16.conv2
@@ -41,9 +43,14 @@ class ImagePredictor:
             print(f"[ImagePredictor] CANH BAO: Khong tim thay {self.model_path}. Dung random.")
 
     def preprocess(self, image_path):
-        image = Image.open(image_path).convert("RGB")
-        tensor = self.transform(image).unsqueeze(0)
-        return tensor.to(self.device)
+        """Match Stage 5 notebook: cv2.imread GRAYSCALE → resize → tensor → repeat(3)."""
+        img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            raise FileNotFoundError(f"Không đọc được ảnh: {image_path}")
+        img = cv2.resize(img, (224, 224))
+        img = img.astype(np.float32) / 255.0
+        tensor = torch.from_numpy(img).unsqueeze(0).repeat(3, 1, 1)  # (3, H, W)
+        return tensor.unsqueeze(0).to(self.device)  # (1, 3, H, W)
 
     def predict(self, image_path):
         """Tra ve multi-label probabilities."""
@@ -55,6 +62,7 @@ class ImagePredictor:
             CLASS_NAMES[0]: round(probs[0].item(), 4),
             CLASS_NAMES[1]: round(probs[1].item(), 4),
             CLASS_NAMES[2]: round(probs[2].item(), 4),
+            CLASS_NAMES[3]: round(probs[3].item(), 4),
         }
 
     def predict_with_gradcam(self, image_path, save_dir=None):
@@ -92,10 +100,9 @@ class ImagePredictor:
                 "detected": p >= self.threshold,
             }
 
+        probs_out = {CLASS_NAMES[i]: float(probs_np[i]) for i in range(len(CLASS_NAMES))}
         return {
-            "probabilities": {CLASS_NAMES[0]: float(probs_np[0]),
-                              CLASS_NAMES[1]: float(probs_np[1]),
-                              CLASS_NAMES[2]: float(probs_np[2])},
+            "probabilities": probs_out,
             "best_class": best_class,
             "best_probability": best_prob,
             "binary_score": best_prob,

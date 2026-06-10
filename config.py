@@ -30,11 +30,11 @@ class Config:
     FL_DATA_DIR: str = os.getenv("FL_DATA_DIR", "./Local_Data/fl_data")
     FL_SYNC_ENABLED: bool = _env_bool("FL_SYNC_ENABLED", False)
 
-    # Multi-label config
-    IMAGE_NUM_CLASSES: int = 3
-    IMAGE_CLASS_NAMES: list = ["Pneumonia", "COPD_Emphysema", "Fibrosis"]
-    AUDIO_NUM_CLASSES: int = 2
-    AUDIO_CLASS_NAMES: list = ["Crackle", "Wheeze"]
+    # Multi-label config — khớp với notebook Stage 5 (4 image classes, 3 audio classes)
+    IMAGE_NUM_CLASSES: int = 4
+    IMAGE_CLASS_NAMES: list = ["Normal", "Pneumonia", "COPD_Emphysema", "Fibrosis"]
+    AUDIO_NUM_CLASSES: int = 3
+    AUDIO_CLASS_NAMES: list = ["normal", "crackle", "wheeze"]
     N_MELS: int = 128
 
 
