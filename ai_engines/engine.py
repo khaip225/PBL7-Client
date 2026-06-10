@@ -178,8 +178,14 @@ class PipelineEngine:
         aud_ckpt = torch.load(audio_head_path, map_location=self.device, weights_only=True)
 
         self.audio_encoder_cls = ASTEncoderNB(embedding_dim=256, dropout=0.2)
-        aud_enc_state = {k.replace("encoder.", ""): v
-                         for k, v in aud_ckpt.items() if k.startswith("encoder.")}
+        # Remap checkpoint keys: encoder.backbone.layer.X → backbone.encoder.layer.X
+        aud_enc_state = {}
+        for k, v in aud_ckpt.items():
+            if not k.startswith("encoder."):
+                continue
+            k2 = k.replace("encoder.", "")  # e.g. "backbone.layer.0..."
+            k2 = k2.replace("backbone.layer.", "backbone.encoder.layer.")
+            aud_enc_state[k2] = v
         missing, _ = self.audio_encoder_cls.load_state_dict(aud_enc_state, strict=False)
         if missing:
             print(f"[PipelineEngine] Audio cls encoder missing: {len(missing)} keys")
@@ -227,16 +233,20 @@ class PipelineEngine:
         return tensor.to(self.device)
 
     def preprocess_audio(self, audio_path: str) -> torch.Tensor:
-        """Audio → mel-spectrogram tensor (1, 128, 384) khớp notebook Stage 1.
+        """Audio → mel-spec tensor (1, T, 128) khớp chính xác notebook Stage 1.
 
-        Notebook dùng librosa: n_fft=1024, hop_length=320, n_mels=128, power_to_db,
-        sau đó load .npy → z-score. Ở đây tính trực tiếp từ WAV với cùng thông số.
+        Notebook `create_mel_spectrogram` + `preprocess_audio`:
+        1. librosa.load(sr=None) — giữ nguyên sample rate gốc
+        2. melspectrogram(n_fft=1024, hop_length=320, n_mels=128)
+        3. power_to_db(ref=np.max)
+        4. z-score normalize
+        5. tile nếu < 384 frames, crop nếu > 384 frames
         """
         import librosa
-        import soundfile as sf
         import numpy as np
+        import soundfile as sf
 
-        # Đọc WAV → mono waveform
+        # Đọc WAV → mono, giữ nguyên sample rate gốc (khớp librosa.load(sr=None))
         try:
             y, sr = librosa.load(audio_path, sr=None, mono=True)
         except Exception:
@@ -246,20 +256,7 @@ class PipelineEngine:
             else:
                 y = waveform_np.astype(np.float32)
 
-        # Resample nếu cần
-        if sr != self.target_sr:
-            y = librosa.resample(y=y, orig_sr=sr, target_sr=self.target_sr)
-            sr = self.target_sr
-
-        # Pad/crop về max_duration
-        target_samples = self.target_sr * self.max_duration
-        if len(y) < target_samples:
-            y = np.pad(y, (0, target_samples - len(y)))
-        else:
-            y = y[:target_samples]
-
-        # Mel-spectrogram khớp chính xác notebook Stage 1:
-        # librosa n_fft=1024, hop_length=320, n_mels=128, power_to_db
+        # Mel-spectrogram khớp create_mel_spectrogram trong notebook
         mel_spec = librosa.feature.melspectrogram(
             y=y, sr=sr, n_fft=1024, hop_length=320, n_mels=128,
         )
@@ -268,15 +265,17 @@ class PipelineEngine:
         # Z-score normalize — khớp preprocess_audio trong notebook
         log_mel_spec = (log_mel_spec - log_mel_spec.mean()) / (log_mel_spec.std() + 1e-6)
 
-        # Pad/crop time frames về 384
-        if log_mel_spec.shape[1] < 384:
-            log_mel_spec = np.pad(log_mel_spec, ((0, 0), (0, 384 - log_mel_spec.shape[1])))
+        # Pad/crop time frames về 384 — dùng tile như notebook (KHÔNG zero-pad)
+        target_frames = 384
+        if log_mel_spec.shape[1] < target_frames:
+            repeats = int(np.ceil(target_frames / log_mel_spec.shape[1]))
+            log_mel_spec = np.tile(log_mel_spec, (1, repeats))[:, :target_frames]
         else:
-            log_mel_spec = log_mel_spec[:, :384]
+            log_mel_spec = log_mel_spec[:, :target_frames]
 
-        # spec_tensor = torch.tensor(spec.T).unsqueeze(0)  # (1, T, F)
+        # spec_tensor shape: (1, T, F) — khớp notebook
         spec_tensor = torch.from_numpy(log_mel_spec.T).float().unsqueeze(0)  # (1, 384, 128)
-        return spec_tensor.to(self.device)  # (1, T, F)
+        return spec_tensor.to(self.device)
 
     # ═══════════════════════════════════════════════════════════════════
     # Hành động 1: Phân loại trực tiếp (Stage 5 encoder + head)

@@ -40,13 +40,17 @@ class AudioPredictor:
     def preprocess(self, audio_path):
         """Match notebook Stage 1: librosa mel-spec → power_to_db → z-score → tensor [1, T, F].
 
-        Notebook dùng: n_fft=1024, hop_length=320, n_mels=128, power_to_db,
-        sau đó load .npy → z-score normalize. Ở đây tính trực tiếp từ WAV.
+        Notebook create_mel_spectrogram + preprocess_audio:
+        1. librosa.load(sr=None) — giữ sample rate gốc
+        2. melspectrogram(n_fft=1024, hop_length=320, n_mels=128)
+        3. power_to_db(ref=np.max)
+        4. z-score normalize
+        5. tile nếu < 384 frames, crop nếu > 384 frames
         """
         import librosa
         import numpy as np
 
-        # Đọc WAV → mono waveform
+        # Đọc WAV → mono, giữ nguyên sample rate gốc
         try:
             y, sr = librosa.load(audio_path, sr=None, mono=True)
         except Exception:
@@ -55,18 +59,6 @@ class AudioPredictor:
                 y = waveform_np.mean(axis=1)
             else:
                 y = waveform_np.astype(np.float32)
-
-        # Resample nếu cần
-        if sr != self.target_sr:
-            y = librosa.resample(y=y, orig_sr=sr, target_sr=self.target_sr)
-            sr = self.target_sr
-
-        # Pad/crop về max_duration
-        target_samples = self.target_sr * self.max_duration
-        if len(y) < target_samples:
-            y = np.pad(y, (0, target_samples - len(y)))
-        else:
-            y = y[:target_samples]
 
         # Mel-spectrogram khớp notebook: n_fft=1024, hop_length=320, n_mels=128, power_to_db
         mel_spec = librosa.feature.melspectrogram(
@@ -77,13 +69,14 @@ class AudioPredictor:
         # Z-score normalize — khớp preprocess_audio trong notebook
         log_mel_spec = (log_mel_spec - log_mel_spec.mean()) / (log_mel_spec.std() + 1e-6)
 
-        # Pad/crop time frames về max_frames
+        # Pad/crop time frames về max_frames — dùng tile như notebook
         if log_mel_spec.shape[1] < self.max_frames:
-            log_mel_spec = np.pad(log_mel_spec, ((0, 0), (0, self.max_frames - log_mel_spec.shape[1])))
+            repeats = int(np.ceil(self.max_frames / log_mel_spec.shape[1]))
+            log_mel_spec = np.tile(log_mel_spec, (1, repeats))[:, :self.max_frames]
         else:
             log_mel_spec = log_mel_spec[:, :self.max_frames]
 
-        # spec_tensor = torch.tensor(spec.T).unsqueeze(0) → (1, T, F)
+        # spec_tensor shape: (1, T, F) — khớp notebook
         spec_tensor = torch.from_numpy(log_mel_spec.T).float().unsqueeze(0)  # (1, 384, 128)
         return spec_tensor.to(self.device)
 
