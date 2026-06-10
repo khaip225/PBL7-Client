@@ -227,46 +227,56 @@ class PipelineEngine:
         return tensor.to(self.device)
 
     def preprocess_audio(self, audio_path: str) -> torch.Tensor:
-        """Audio → mel-spectrogram tensor (1, 128, 384) khớp notebook."""
-        import torchaudio
-        import soundfile as sf
+        """Audio → mel-spectrogram tensor (1, 128, 384) khớp notebook Stage 1.
 
+        Notebook dùng librosa: n_fft=1024, hop_length=320, n_mels=128, power_to_db,
+        sau đó load .npy → z-score. Ở đây tính trực tiếp từ WAV với cùng thông số.
+        """
+        import librosa
+        import soundfile as sf
+        import numpy as np
+
+        # Đọc WAV → mono waveform
         try:
-            waveform, sr = torchaudio.load(audio_path)
+            y, sr = librosa.load(audio_path, sr=None, mono=True)
         except Exception:
             waveform_np, sr = sf.read(audio_path)
-            waveform = torch.from_numpy(waveform_np).float()
-            if waveform.ndim == 1:
-                waveform = waveform.unsqueeze(0)
-            elif waveform.ndim == 2:
-                waveform = waveform.transpose(0, 1)
+            if waveform_np.ndim > 1:
+                y = waveform_np.mean(axis=1)
+            else:
+                y = waveform_np.astype(np.float32)
 
-        if waveform.shape[0] > 1:
-            waveform = torch.mean(waveform, dim=0, keepdim=True)
-
+        # Resample nếu cần
         if sr != self.target_sr:
-            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=self.target_sr)
-            waveform = resampler(waveform)
+            y = librosa.resample(y=y, orig_sr=sr, target_sr=self.target_sr)
+            sr = self.target_sr
 
+        # Pad/crop về max_duration
         target_samples = self.target_sr * self.max_duration
-        current = waveform.shape[1]
-        if current < target_samples:
-            waveform = F.pad(waveform, (0, target_samples - current))
+        if len(y) < target_samples:
+            y = np.pad(y, (0, target_samples - len(y)))
         else:
-            waveform = waveform[:, :target_samples]
+            y = y[:target_samples]
 
-        mel_transform = torchaudio.transforms.MelSpectrogram(
-            sample_rate=self.target_sr, n_fft=1024, hop_length=512, n_mels=128,
+        # Mel-spectrogram khớp chính xác notebook Stage 1:
+        # librosa n_fft=1024, hop_length=320, n_mels=128, power_to_db
+        mel_spec = librosa.feature.melspectrogram(
+            y=y, sr=sr, n_fft=1024, hop_length=320, n_mels=128,
         )
-        mel_spec = mel_transform(waveform)  # (1, 128, T)
-        mel_spec = (mel_spec - mel_spec.mean()) / (mel_spec.std() + 1e-6)
+        log_mel_spec = librosa.power_to_db(mel_spec, ref=np.max)  # (128, T)
 
-        if mel_spec.shape[-1] < 384:
-            mel_spec = F.pad(mel_spec, (0, 384 - mel_spec.shape[-1]))
+        # Z-score normalize — khớp preprocess_audio trong notebook
+        log_mel_spec = (log_mel_spec - log_mel_spec.mean()) / (log_mel_spec.std() + 1e-6)
+
+        # Pad/crop time frames về 384
+        if log_mel_spec.shape[1] < 384:
+            log_mel_spec = np.pad(log_mel_spec, ((0, 0), (0, 384 - log_mel_spec.shape[1])))
         else:
-            mel_spec = mel_spec[:, :, :384]
+            log_mel_spec = log_mel_spec[:, :384]
 
-        return mel_spec.float().to(self.device)  # (1, 128, 384)
+        # spec_tensor = torch.tensor(spec.T).unsqueeze(0)  # (1, T, F)
+        spec_tensor = torch.from_numpy(log_mel_spec.T).float().unsqueeze(0)  # (1, 384, 128)
+        return spec_tensor.to(self.device)  # (1, T, F)
 
     # ═══════════════════════════════════════════════════════════════════
     # Hành động 1: Phân loại trực tiếp (Stage 5 encoder + head)
