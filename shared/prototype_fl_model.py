@@ -40,18 +40,33 @@ from shared.momentum_prototype import MomentumPrototypeModule, MemoryBank
 # ---------------------------------------------------------------------------
 
 FL_CONFIG = {
+    # Architecture
     "embed_dim":        256,
     "dropout":          0.2,
-    "temperature":      0.15,
+    "n_mels":           128,
+    "max_frames":       384,
+    "img_size":         224,
+    # Training hyperparams (khớp notebook federate_learning.ipynb)
+    "temperature":      0.1,
     "memory_bank_size": 1024,
-    "contrastive_weight":   1.0,
-    "prototype_weight":     1.0,
-    "ontology_weight":      0.5,
-    "normal_bridge_weight": 0.5,
-    "cross_modal_weight":   0.3,
-    "triplet_weight":       0.5,
-    "use_fedprox":          True,
-    "mu":                   0.01,
+    "lr_backbone":      2e-5,
+    "lr_proj":          1e-4,
+    "weight_decay":     5e-4,
+    "accum_steps":      1,
+    # Loss weights
+    "contrastive_weight":     1.0,
+    "prototype_weight":       1.0,
+    "ontology_weight":        1.0,
+    "normal_bridge_weight":   0.5,
+    "triplet_weight":         0.5,
+    "intra_sep_weight":       0.5,
+    "inter_sep_weight":       0.5,
+    # FedProx
+    "use_fedprox":            True,
+    "mu":                     0.01,
+    # Evaluation
+    "patience":               5,
+    # Data config
     "img_classes": 4,   # Normal, Pneumonia, COPD/Emphysema, Fibrosis
     "aud_classes": 3,   # Normal, Crackle, Wheeze
 }
@@ -204,6 +219,102 @@ def cross_modal_loss(img_emb: torch.Tensor, aud_emb: torch.Tensor,
     return (loss_i2a.mean() + loss_a2i.mean()) / 2.0
 
 
+def inter_prototype_separation_loss(proto: MomentumPrototypeModule, margin: float = 0.1) -> torch.Tensor:
+    """Push image-disease prototypes away from unrelated acoustic prototypes.
+
+    Allowed: crackle↔pneumonia+fibrosis, wheeze↔copd
+    Not allowed: crackle↔copd, wheeze↔pneumonia+fibrosis
+    """
+    img_protos = torch.stack([proto.p_pneumonia, proto.p_copd, proto.p_fibrosis])
+    aud_protos = torch.stack([proto.p_crackle, proto.p_wheeze])
+    sim = torch.matmul(img_protos, aud_protos.T)  # (3, 2)
+    # allowed_high[i,j]=1 means pair should be similar → don't penalize
+    allowed_high = torch.tensor([[1, 0], [0, 1], [1, 0]], dtype=torch.float32, device=sim.device)
+    not_allowed = 1.0 - allowed_high
+    return (F.relu(sim - margin) * not_allowed).mean()
+
+
+def intra_prototype_separation_loss(proto: MomentumPrototypeModule, margin: float = 0.1,
+                                    normal_margin: float = 0.25) -> torch.Tensor:
+    """Push same-modality prototypes away from each other.
+
+    Image side: all 4 image prototypes separated + normal_img separated from disease
+    Audio side: all 3 audio prototypes separated + normal_aud separated from disease
+    """
+    # --- Image side ---
+    img_protos = torch.stack([proto.p_normal_img, proto.p_pneumonia, proto.p_copd, proto.p_fibrosis])
+    img_sim = torch.matmul(img_protos, img_protos.T)  # (4, 4)
+    img_mask = torch.ones_like(img_sim) - torch.eye(4, device=img_sim.device)
+    img_sep_loss = (F.relu(img_sim - margin) * img_mask).mean()
+
+    disease_img = torch.stack([proto.p_pneumonia, proto.p_copd, proto.p_fibrosis])
+    sim_normal_disease_img = torch.matmul(proto.p_normal_img.unsqueeze(0), disease_img.T)
+    img_normal_sep_loss = F.relu(sim_normal_disease_img - normal_margin).mean()
+
+    # --- Audio side ---
+    aud_protos = torch.stack([proto.p_normal_aud, proto.p_crackle, proto.p_wheeze])
+    aud_sim = torch.matmul(aud_protos, aud_protos.T)  # (3, 3)
+    aud_mask = torch.ones_like(aud_sim) - torch.eye(3, device=aud_sim.device)
+    aud_sep_loss = (F.relu(aud_sim - margin) * aud_mask).mean()
+
+    disease_aud = torch.stack([proto.p_crackle, proto.p_wheeze])
+    sim_normal_disease_aud = torch.matmul(proto.p_normal_aud.unsqueeze(0), disease_aud.T)
+    aud_normal_sep_loss = F.relu(sim_normal_disease_aud - normal_margin).mean()
+
+    return img_sep_loss + aud_sep_loss + img_normal_sep_loss + aud_normal_sep_loss
+
+
+def batch_hard_negative_triplet_loss(
+    z_img: torch.Tensor | None, z_aud: torch.Tensor | None,
+    img_labels: torch.Tensor | None, aud_labels: torch.Tensor | None,
+    proto: MomentumPrototypeModule, margin: float = 0.15,
+) -> torch.Tensor:
+    """Hard-negative triplet: pull embedding toward its correct prototype,
+    push away from look-alike prototype.
+
+    Image: pneumonia→pneumonia (pos), fibrosis (neg); fibrosis→fibrosis (pos), pneumonia (neg)
+    Audio: crackle→crackle (pos), wheeze (neg); wheeze→wheeze (pos), crackle (neg)
+    """
+    loss = torch.tensor(0.0, device=proto.p_crackle.device)
+    valid_pairs = 0
+
+    if z_img is not None and img_labels is not None:
+        # Pneumonia → pos=pneumonia, neg=fibrosis
+        pne_mask = img_labels[:, 1] == 1
+        if pne_mask.sum() > 0:
+            sim_pos = F.cosine_similarity(z_img[pne_mask], proto.target_p_pneumonia.unsqueeze(0))
+            sim_neg = F.cosine_similarity(z_img[pne_mask], proto.target_p_fibrosis.unsqueeze(0))
+            loss = loss + F.relu(sim_neg - sim_pos + margin).mean()
+            valid_pairs += 1
+
+        # Fibrosis → pos=fibrosis, neg=pneumonia
+        fib_mask = img_labels[:, 3] == 1
+        if fib_mask.sum() > 0:
+            sim_pos = F.cosine_similarity(z_img[fib_mask], proto.target_p_fibrosis.unsqueeze(0))
+            sim_neg = F.cosine_similarity(z_img[fib_mask], proto.target_p_pneumonia.unsqueeze(0))
+            loss = loss + F.relu(sim_neg - sim_pos + margin).mean()
+            valid_pairs += 1
+
+    if z_aud is not None and aud_labels is not None:
+        # Crackle → pos=crackle, neg=wheeze
+        cra_mask = aud_labels[:, 1] == 1
+        if cra_mask.sum() > 0:
+            sim_pos = F.cosine_similarity(z_aud[cra_mask], proto.target_p_crackle.unsqueeze(0))
+            sim_neg = F.cosine_similarity(z_aud[cra_mask], proto.target_p_wheeze.unsqueeze(0))
+            loss = loss + F.relu(sim_neg - sim_pos + margin).mean()
+            valid_pairs += 1
+
+        # Wheeze → pos=wheeze, neg=crackle
+        whe_mask = aud_labels[:, 2] == 1
+        if whe_mask.sum() > 0:
+            sim_pos = F.cosine_similarity(z_aud[whe_mask], proto.target_p_wheeze.unsqueeze(0))
+            sim_neg = F.cosine_similarity(z_aud[whe_mask], proto.target_p_crackle.unsqueeze(0))
+            loss = loss + F.relu(sim_neg - sim_pos + margin).mean()
+            valid_pairs += 1
+
+    return loss / max(1, valid_pairs)
+
+
 # ---------------------------------------------------------------------------
 # FedAvg Selective Aggregation
 # ---------------------------------------------------------------------------
@@ -267,7 +378,7 @@ class PrototypeFLClient:
         img_loader=None,
         aud_loader=None,
         device: str = "cpu",
-        lr: float = 5e-6,
+        lr: float | None = None,
         config: dict | None = None,
     ):
         self.client_id = client_id
@@ -275,7 +386,6 @@ class PrototypeFLClient:
         self.img_loader = img_loader
         self.aud_loader = aud_loader
         self.device = device
-        self.lr = lr
         self.cfg = config or FL_CONFIG
 
         self.num_samples = (
@@ -288,18 +398,21 @@ class PrototypeFLClient:
             embedding_dim=self.cfg["embed_dim"],
             dropout=self.cfg["dropout"],
         ).to(device)
-        self.img_enc.freeze_backbone(keep_last_block=True)
-
         self.aud_enc = ASTEncoder(
             embedding_dim=self.cfg["embed_dim"],
             dropout=self.cfg["dropout"],
         ).to(device)
-        self.aud_enc.freeze_backbone(num_freeze=8)
 
-        # Prototype module
+        # Freeze toàn bộ backbone (khớp notebook: chỉ train projection + prototypes)
+        for param in self.img_enc.features.parameters():
+            param.requires_grad = False
+        for param in self.aud_enc.backbone.parameters():
+            param.requires_grad = False
+
+        # Prototype module (momentum=0.90 khớp notebook)
         self.proto = MomentumPrototypeModule(
             dim=self.cfg["embed_dim"],
-            momentum=0.99,
+            momentum=0.90,
         ).to(device)
 
         # Memory banks
@@ -316,15 +429,34 @@ class PrototypeFLClient:
             device=device,
         )
 
-        # Collect trainable params
-        self._trainable_params = list(self.img_enc.projection.parameters()) + \
-                                 list(self.aud_enc.projection.parameters()) + \
-                                 list(self.proto.parameters())
-        self._global_params_cache: dict[str, torch.Tensor] = {}
+        # Per-param-group LR (khớp notebook: backbone 2e-5, proj 1e-4)
+        img_backbone_params, img_proj_params, aud_backbone_params, aud_proj_params = [], [], [], []
+        for name, param in self.img_enc.named_parameters():
+            if "projection" in name:
+                img_proj_params.append(param)
+            else:
+                img_backbone_params.append(param)
+        for name, param in self.aud_enc.named_parameters():
+            if "projection" in name:
+                aud_proj_params.append(param)
+            else:
+                aud_backbone_params.append(param)
 
-        # Optimizer + scaler
-        self.opt = optim.AdamW(self._trainable_params, lr=lr)
+        param_groups = [
+            {"params": [p for p in img_backbone_params if p.requires_grad], "lr": self.cfg["lr_backbone"]},
+            {"params": [p for p in aud_backbone_params if p.requires_grad], "lr": self.cfg["lr_backbone"]},
+            {"params": [p for p in img_proj_params if p.requires_grad],        "lr": self.cfg["lr_proj"]},
+            {"params": [p for p in aud_proj_params if p.requires_grad],        "lr": self.cfg["lr_proj"]},
+            {"params": [p for p in self.proto.parameters() if p.requires_grad], "lr": self.cfg["lr_proj"]},
+        ]
+        self.opt = optim.AdamW(param_groups, weight_decay=self.cfg["weight_decay"])
+
+        # Collect all trainable params (for grad clip)
+        self._trainable_params = [p for g in param_groups for p in g["params"] if p.requires_grad]
+
         self.scaler = torch.cuda.amp.GradScaler() if device.startswith("cuda") else None
+        self.scheduler = None  # created in train() once steps is known
+        self._global_params_cache: dict[str, torch.Tensor] = {}
 
     # --- State management ---
     def get_sync_state(self) -> OrderedDict:
@@ -396,8 +528,14 @@ class PrototypeFLClient:
         return (self.cfg["mu"] / 2.0) * total
 
     # --- Training ---
-    def train(self, global_state: OrderedDict, local_epochs: int = 1) -> float:
+    def train(self, global_state: OrderedDict, local_epochs: int = 1,
+              round_idx: int = 0) -> float:
         """Run one round of local training.
+
+        Args:
+            global_state: aggregated state from server
+            local_epochs: number of local epochs
+            round_idx: current FL round (0-based), used for target_sim annealing
 
         Returns average loss.
         """
@@ -419,7 +557,21 @@ class PrototypeFLClient:
         if steps == 0:
             return 0.0
 
+        # target_sim annealing (khớp notebook: 0.3→0.6 theo round)
+        target_sim_img = min(0.3 + round_idx * 0.02, 0.6)
+        target_sim_aud = min(0.3 + round_idx * 0.02, 0.6)
+
+        # Scheduler (CosineWarmup, khớp notebook)
+        total_steps = steps * local_epochs
+        from transformers import get_cosine_schedule_with_warmup
+        self.scheduler = get_cosine_schedule_with_warmup(
+            self.opt,
+            num_warmup_steps=int(0.1 * total_steps),
+            num_training_steps=total_steps,
+        )
+
         total_loss_sum = 0.0
+        accum_counter = 0
 
         for _epoch in range(local_epochs):
             iter_i = iter(self.img_loader) if self.img_loader else None
@@ -427,10 +579,7 @@ class PrototypeFLClient:
 
             for _step in range(steps):
                 zi = za = yi = ya = None
-                l_con_i = l_con_a = l_pr_i = l_pr_a = l_cr = torch.tensor(0.0)
-
-                with torch.cuda.amp.autocast() if self.device.startswith("cuda") else torch.no_grad():
-                    pass  # we'll use manual autocast below
+                l_con_i = l_con_a = l_pr_i = l_pr_a = l_cr = torch.tensor(0.0, device=self.device)
 
                 # --- Image batch ---
                 if iter_i is not None:
@@ -451,7 +600,8 @@ class PrototypeFLClient:
                     l_con_i = contrastive_loss(
                         zi, yi, mf, ml, temperature=self.cfg["temperature"],
                     )
-                    l_pr_i = proto_consistency_loss(zi, self.proto.get_img_protos(), yi)
+                    l_pr_i = proto_consistency_loss(zi, self.proto.get_img_protos(), yi,
+                                                    target_sim=target_sim_img)
                     self.mb_img.add(zi, yi)
 
                 # --- Audio batch ---
@@ -473,7 +623,8 @@ class PrototypeFLClient:
                     l_con_a = contrastive_loss(
                         za, ya, mf, ml, temperature=self.cfg["temperature"],
                     )
-                    l_pr_a = proto_consistency_loss(za, self.proto.get_aud_protos(), ya)
+                    l_pr_a = proto_consistency_loss(za, self.proto.get_aud_protos(), ya,
+                                                    target_sim=target_sim_aud)
                     self.mb_aud.add(za, ya)
 
                 # --- Cross-modal (only when both modalities available) ---
@@ -481,40 +632,65 @@ class PrototypeFLClient:
                     l_cr = cross_modal_loss(zi, za, yi, ya, temperature=self.cfg["temperature"])
 
                 # --- Prototype regularization losses ---
-                l_onto   = ontology_range_loss(self.proto)
-                l_bridge = normal_bridge_loss(self.proto)
-                l_trip   = triplet_loss(self.proto)
-                l_prox   = self._fedprox_term() if self.cfg["use_fedprox"] else torch.tensor(0.0, device=self.device)
+                l_onto      = ontology_range_loss(self.proto)
+                l_bridge    = normal_bridge_loss(self.proto)
+                l_trip_proto = triplet_loss(self.proto)
+                l_trip_batch = batch_hard_negative_triplet_loss(zi, za, yi, ya, self.proto)
+                l_inter_sep = inter_prototype_separation_loss(self.proto)
+                l_intra_sep = intra_prototype_separation_loss(self.proto)
+                l_prox      = self._fedprox_term() if self.cfg["use_fedprox"] else torch.tensor(0.0, device=self.device)
 
+                # Loss formula (khớp notebook)
                 loss = (
-                    self.cfg["contrastive_weight"]   * (l_con_i + l_con_a)
-                    + self.cfg["prototype_weight"]   * (l_pr_i + l_pr_a)
-                    + self.cfg["ontology_weight"]    * l_onto
+                    self.cfg["contrastive_weight"]    * (l_con_i + l_con_a)
+                    + self.cfg["prototype_weight"]    * (l_pr_i + l_pr_a)
+                    + self.cfg["ontology_weight"]     * l_onto
                     + self.cfg["normal_bridge_weight"] * l_bridge
-                    + self.cfg["cross_modal_weight"] * l_cr
-                    + self.cfg["triplet_weight"]     * l_trip
+                    + self.cfg["triplet_weight"]      * (l_trip_batch + l_trip_proto)
+                    + self.cfg["inter_sep_weight"]    * l_inter_sep
+                    + self.cfg["intra_sep_weight"]    * l_intra_sep
                     + l_prox
-                )
+                ) / self.cfg["accum_steps"]
 
                 if torch.isnan(loss) or torch.isinf(loss):
                     self.opt.zero_grad()
                     continue
 
-                self.opt.zero_grad()
-
+                # Gradient accumulation
                 if self.scaler:
                     self.scaler.scale(loss).backward()
-                    self.scaler.unscale_(self.opt)
-                    torch.nn.utils.clip_grad_norm_(self._trainable_params, 1.0)
-                    self.scaler.step(self.opt)
-                    self.scaler.update()
                 else:
                     loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self._trainable_params, 1.0)
-                    self.opt.step()
 
-                self.proto.normalize_and_update()
+                accum_counter += 1
+                if accum_counter % self.cfg["accum_steps"] == 0:
+                    if self.scaler:
+                        self.scaler.unscale_(self.opt)
+                        torch.nn.utils.clip_grad_norm_(self._trainable_params, 1.0)
+                        self.scaler.step(self.opt)
+                        self.scaler.update()
+                    else:
+                        torch.nn.utils.clip_grad_norm_(self._trainable_params, 1.0)
+                        self.opt.step()
+                    self.scheduler.step()
+                    self.opt.zero_grad()
+                    self.proto.normalize_and_update()
+
                 total_loss_sum += loss.item()
+
+        # Handle remaining accumulated gradients
+        if accum_counter % self.cfg["accum_steps"] != 0:
+            if self.scaler:
+                self.scaler.unscale_(self.opt)
+                torch.nn.utils.clip_grad_norm_(self._trainable_params, 1.0)
+                self.scaler.step(self.opt)
+                self.scaler.update()
+            else:
+                torch.nn.utils.clip_grad_norm_(self._trainable_params, 1.0)
+                self.opt.step()
+            self.scheduler.step()
+            self.opt.zero_grad()
+            self.proto.normalize_and_update()
 
         avg_loss = total_loss_sum / (local_epochs * steps) if steps > 0 else 0.0
         return avg_loss

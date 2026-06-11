@@ -8,5 +8,4 @@ __pycache__/
 .env
 client_state.json
 *.log
-Local_Data/
 fl_worker/fl_data/

@@ -1,0 +1,9 @@
+{
+  "final_score": 0.9902,
+  "probabilities": {
+    "Normal": 0.9902,
+    "Crackle": 0.0298,
+    "Wheeze": 0.0023
+  },
+  "label": "Normal"
+}

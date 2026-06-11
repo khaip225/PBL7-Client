@@ -1,0 +1,5 @@
+path,Pneumonia,COPD_Emphysema,Fibrosis
+Fibrosis_Crackle_20260611_002011.jpg,0,0,1
+Pneumonia_Crackle_20260611_002043.jpg,1,0,0
+COPD_Emphysema_Wheeze_20260611_002112.jpg,0,1,0
+Normal_20260611_085829.jpeg,0,0,0

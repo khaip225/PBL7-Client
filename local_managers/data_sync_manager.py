@@ -4,6 +4,7 @@ import os
 import shutil
 import soundfile as sf
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from config import config
@@ -65,24 +66,63 @@ class DataSyncManager:
         """
         state = self.load_state()
         batch_dir = self._ensure_batch_dir(int(state.get("current_batch", 1)))
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         audio_dest = None
         image_dest = None
         csv_path = None
 
         if audio_path:
-            audio_segments, csv_path = self._sync_audio_segments(audio_path, batch_dir, labels)
+            audio_segments, csv_path = self._sync_audio_segments(audio_path, batch_dir, labels, timestamp)
             audio_dest = audio_segments[0] if audio_segments else None
 
         if image_path:
             image_dest_dir = batch_dir / "fl_image"
-            image_dest = self._move_to_batch(image_path, image_dest_dir)
+            image_dest = self._rename_to_batch(image_path, image_dest_dir, labels, "image", timestamp)
             # Write multi-label image CSV
             self._append_image_ledger(batch_dir, str(image_dest), labels)
 
         return SyncResult(audio_dest=audio_dest, image_dest=image_dest, batch_dir=str(batch_dir), csv_path=csv_path)
 
+    def _build_approved_name(self, labels: dict[str, bool], modality: str, timestamp: str) -> str:
+        """Build file name from doctor-approved labels.
+
+        Image: {Disease}_{Acoustic}_{timestamp}.{ext}    (e.g. Pneumonia_Crackle_20260611_140530.png)
+        Audio: {Disease}_{Acoustic}_{timestamp}_seg{I}.{ext}
+               Disease = các bệnh phổi có label=True (Pneumonia, COPD_Emphysema, Fibrosis)
+               Acoustic = các dấu hiệu âm thanh có label=True (Crackle, Wheeze)
+               Nếu không có gì → "Normal"
+        """
+        disease_parts = []
+        for k in ["Pneumonia", "COPD_Emphysema", "Fibrosis"]:
+            if labels.get(k, False):
+                disease_parts.append(k)
+
+        acoustic_parts = []
+        for k in ["Crackle", "Wheeze"]:
+            if labels.get(k, False):
+                acoustic_parts.append(k)
+
+        parts = disease_parts + acoustic_parts
+        prefix = "_".join(parts) if parts else "Normal"
+        return f"{prefix}_{timestamp}"
+
+    def _rename_to_batch(self, source_path: str, dest_dir: Path, labels: dict[str, bool], modality: str, timestamp: str) -> str:
+        """Move file to batch dir with new name based on approved labels."""
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        ext = os.path.splitext(source_path)[1]
+        new_name = self._build_approved_name(labels, modality, timestamp) + ext
+        dest_path = dest_dir / new_name
+
+        source_abs = os.path.abspath(source_path)
+        dest_abs = os.path.abspath(dest_path)
+        if source_abs != dest_abs:
+            shutil.move(source_path, dest_path)
+
+        return str(dest_path)
+
     def _move_to_batch(self, source_path: str, dest_dir: Path) -> str:
+        """Move file to batch dir keeping original name. (deprecated — use _rename_to_batch)"""
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest_path = dest_dir / os.path.basename(source_path)
 
@@ -134,13 +174,14 @@ class DataSyncManager:
 
         return str(csv_path)
 
-    def _sync_audio_segments(self, audio_path: str, batch_dir: Path, labels: dict[str, bool]) -> tuple[list[str], str | None]:
+    def _sync_audio_segments(self, audio_path: str, batch_dir: Path, labels: dict[str, bool], timestamp: str) -> tuple[list[str], str | None]:
         dest_dir = batch_dir / "fl_audio"
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        # Determine if any abnormal label is present (not Normal)
-        is_abnormal = any(v for k, v in labels.items() if k != "Normal")
-        label_str = "Abnormal" if is_abnormal else "Normal"
+        # Multi-label: crackle, wheeze (độc lập)
+        has_crackle = labels.get("Crackle", False)
+        has_wheeze = labels.get("Wheeze", False)
+        is_normal = not has_crackle and not has_wheeze
 
         meta = self._load_segment_metadata(audio_path)
 
@@ -153,7 +194,7 @@ class DataSyncManager:
             segments = self._generate_segments(duration, meta["chunk_duration"], meta["overlap"])
 
         selected = []
-        if label_str == "Normal":
+        if is_normal:
             selected = segments
         else:
             threshold = meta["threshold"]
@@ -164,7 +205,8 @@ class DataSyncManager:
         segment_paths = []
         csv_path = None
         txt_lines = []
-        stem = Path(audio_path).stem
+        # Build approved prefix từ labels
+        approved_prefix = self._build_approved_name(labels, "audio", timestamp)
         for idx, seg in enumerate(selected, start=1):
             start = float(seg.get("start", 0.0))
             end = float(seg.get("end", 0.0))
@@ -174,17 +216,19 @@ class DataSyncManager:
                 continue
 
             segment_audio = audio_data[start_idx:end_idx]
-            segment_name = f"{stem}_seg{idx}.wav"
+            segment_name = f"{approved_prefix}_seg{idx}.wav"
             segment_path = dest_dir / segment_name
             sf.write(segment_path, segment_audio, sr)
 
             segment_paths.append(str(segment_path))
             csv_path = self._append_audio_ledger(batch_dir, str(segment_path), labels)
-            abnormal_flag = 1 if label_str == "Abnormal" else 0
-            txt_lines.append(f"{start:.3f}\t{end:.3f}\t{abnormal_flag}")
+            # Multi-label txt: start\tend\tcrackle\twheeze
+            c = 1 if has_crackle else 0
+            w = 1 if has_wheeze else 0
+            txt_lines.append(f"{start:.3f}\t{end:.3f}\t{c}\t{w}")
 
         if txt_lines:
-            txt_path = dest_dir / f"{stem}.txt"
+            txt_path = dest_dir / f"{approved_prefix}.txt"
             with txt_path.open("w", encoding="utf-8") as f:
                 f.write("\n".join(txt_lines) + "\n")
 

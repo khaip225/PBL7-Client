@@ -132,7 +132,11 @@ class PrototypeFlowerClient(fl.client.NumPyClient):
             )
 
         t_start = time.perf_counter()
-        avg_loss = self.pc.train(self.pc._global_params_cache if hasattr(self.pc, '_global_params_cache') else OrderedDict(), local_epochs=local_epochs)
+        avg_loss = self.pc.train(
+            self.pc._global_params_cache if hasattr(self.pc, '_global_params_cache') else OrderedDict(),
+            local_epochs=local_epochs,
+            round_idx=self._round - 1,  # 0-based for target_sim annealing
+        )
         train_time = time.perf_counter() - t_start
 
         print(f"  ✅ Training complete — Loss: {avg_loss:.4f}, Time: {train_time:.1f}s")
@@ -359,6 +363,26 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
     finally:
+        # Merge global FL state into local model and save full checkpoint
+        try:
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            models_dir = os.path.join(project_root, "models")
+            os.makedirs(models_dir, exist_ok=True)
+            save_path = os.path.join(models_dir, "stage4_best_model.pth")
+
+            torch.save({
+                "image_encoder": proto_cl.img_enc.state_dict(),
+                "audio_encoder": proto_cl.aud_enc.state_dict(),
+                "prototype_module": proto_cl.proto.state_dict(),
+                "round": flower_client._round,
+                "modality": proto_cl.modality,
+                "client_id": proto_cl.client_id,
+                "metrics": {},
+            }, save_path)
+            print(f"💾 Saved updated stage4_best_model.pth (round {flower_client._round})")
+        except Exception as e:
+            print(f"⚠️  Failed to save stage4_best_model.pth: {e}")
+
         api_client.update_training_state(
             connected_to_flower=False,
             training_active=False,

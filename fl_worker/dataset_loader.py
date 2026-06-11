@@ -2,9 +2,9 @@
 
 Datasets return:
   - Image: (tensor[3,224,224], labels[4])  → [Normal, Pneumonia, COPD, Fibrosis]
-  - Audio: (tensor[3,224,224], labels[3])  → [normal, crackle, wheeze]
+  - Audio: (tensor[max_frames, n_mels], labels[3])  → [normal, crackle, wheeze]
 
-The image dataset also returns a mel-spectrogram as 3-channel 224x224 for ViT input.
+The audio dataset returns raw mel-spectrogram (log-mel) for AST input.
 """
 
 from __future__ import annotations
@@ -206,7 +206,8 @@ AUD_LABEL_MAP = {
 class FLAudioEncoderDataset(Dataset):
     """Multi-label audio dataset for encoder training.
 
-    Loads mel-spectrograms from .wav files, converts to 3-channel 224x224 for ViT input.
+    Loads log-mel spectrograms from .wav files, returns raw mel-spec tensor
+    (max_frames, n_mels) for AST input.
 
     Expects CSV columns: path, normal, crackle, wheeze   (or path, label)
     If using 'label' column (old format), converts via AUD_LABEL_MAP.
@@ -214,7 +215,7 @@ class FLAudioEncoderDataset(Dataset):
 
     def __init__(self, csv_file: str, audio_dir: str, is_train: bool = True,
                  target_sr: int = 16000, n_mels: int = 128, max_length: int = 15,
-                 img_size: int = 224):
+                 max_frames: int = 384):
         if not os.path.exists(csv_file):
             raise FileNotFoundError(f"Audio CSV not found: {csv_file}")
 
@@ -223,7 +224,8 @@ class FLAudioEncoderDataset(Dataset):
         self.is_train = is_train
         self.target_sr = target_sr
         self.max_length = max_length
-        self.img_size = img_size
+        self.n_mels = n_mels
+        self.max_frames = max_frames
 
         self.mel_spec = torchaudio.transforms.MelSpectrogram(
             sample_rate=target_sr,
@@ -233,7 +235,7 @@ class FLAudioEncoderDataset(Dataset):
         )
         self.to_db = torchaudio.transforms.AmplitudeToDB()
 
-        # Audio augmentations
+        # Audio augmentations (on spectrogram)
         self.freq_mask = torchaudio.transforms.FrequencyMasking(freq_mask_param=10)
         self.time_mask = torchaudio.transforms.TimeMasking(time_mask_param=20)
 
@@ -262,8 +264,8 @@ class FLAudioEncoderDataset(Dataset):
             fname = os.path.basename(wav_path.replace("\\", "/"))
             audio_path = os.path.join(self.audio_dir, fname)
         if not os.path.exists(audio_path):
-            # Return dummy
-            dummy = torch.zeros(3, self.img_size, self.img_size)
+            # Return dummy mel-spec
+            dummy = torch.zeros(self.max_frames, self.n_mels)
             return dummy, torch.zeros(3, dtype=torch.float32)
 
         try:
@@ -295,31 +297,29 @@ class FLAudioEncoderDataset(Dataset):
         else:
             waveform = waveform[:, :target_len]
 
-        # Mel spectrogram
-        spec = self.mel_spec(waveform)       # (1, n_mels, time)
-        spec_db = self.to_db(spec)
+        # Mel spectrogram → (1, n_mels, time)
+        spec = self.mel_spec(waveform)
+        spec_db = self.to_db(spec)  # (1, n_mels, time)
 
-        # Normalize
+        # Z-score normalize
         mean = spec_db.mean()
         std = spec_db.std()
         spec_db = (spec_db - mean) / (std + 1e-6)
 
-        # Augmentation
+        # Augmentation (on spectrogram)
         if self.is_train:
             spec_db = self.freq_mask(spec_db)
             spec_db = self.time_mask(spec_db)
 
-        # Convert to 3-channel 224x224 for ViT
-        spec_3ch = spec_db.repeat(3, 1, 1)                    # (3, 128, T)
-        spec_3ch = F.interpolate(
-            spec_3ch.unsqueeze(0),
-            size=(self.img_size, self.img_size),
-            mode="bilinear",
-            align_corners=False,
-        ).squeeze(0)  # (3, 224, 224)
+        # Convert to AST format: (T, n_mels) — frames × mel bins
+        spec_db = spec_db.squeeze(0).transpose(0, 1)  # (time, n_mels)
 
-        # Normalize to ImageNet-like range
-        spec_3ch = (spec_3ch - spec_3ch.mean()) / (spec_3ch.std() + 1e-6)
+        # Pad/crop to max_frames
+        cur_frames = spec_db.shape[0]
+        if cur_frames < self.max_frames:
+            spec_db = F.pad(spec_db, (0, 0, 0, self.max_frames - cur_frames))
+        else:
+            spec_db = spec_db[:self.max_frames, :]
 
         # --- Labels ---
         if self._label_mode == "multi":
@@ -336,7 +336,7 @@ class FLAudioEncoderDataset(Dataset):
         else:
             labels = torch.zeros(3, dtype=torch.float32)
 
-        return spec_3ch, labels
+        return spec_db, labels
 
 
 def load_audio_data(client_id: int, batch_size: int = 16,
