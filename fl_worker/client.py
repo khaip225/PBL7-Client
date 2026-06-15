@@ -169,24 +169,45 @@ class PrototypeFlowerClient(fl.client.NumPyClient):
 
     # --- evaluate: cross-modal retrieval evaluation ---
     def evaluate(self, parameters: list[np.ndarray], config: dict) -> tuple:
-        """Simple evaluation — returns loss placeholder.
-
-        Full evaluation (cross-modal retrieval mAP) is done server-side
-        after aggregation for global metrics.
-        """
+        """Run validation on local hold-out set."""
         self.set_parameters(parameters)
 
-        # Placeholder evaluation
-        val_loss = 0.0
-        val_samples = 1
+        if self.api:
+            self.api.update_training_state(status="evaluating")
+
+        # Use the validation loader set during build_proto_client
+        val_loader = getattr(self.pc, "_val_loader", None)
+        if val_loader is None:
+            print("[WARNING] evaluate(): no val_loader available, returning placeholder")
+            return 0.0, 1, {"loss": 0.0}
+
+        self.pc.model.eval()
+        total_loss = 0.0
+        total_samples = 0
+
+        with torch.no_grad():
+            for batch in val_loader:
+                images = batch["image"].to(self.pc.device)
+                audios = batch["audio"].to(self.pc.device)
+                labels = {k: v.to(self.pc.device) for k, v in batch.get("labels", {}).items()}
+
+                img_emb = self.pc.image_encoder(images)
+                aud_emb = self.pc.audio_encoder(audios)
+
+                loss = self.pc.compute_loss(img_emb, aud_emb, labels)
+                n = images.size(0)
+                total_loss += loss.item() * n
+                total_samples += n
+
+        val_loss = total_loss / max(total_samples, 1)
 
         if self.api:
             self.api.update_training_state(
                 val_loss=val_loss,
-                status="evaluating",
+                status="idle",
             )
 
-        return float(val_loss), val_samples, {"loss": val_loss}
+        return float(val_loss), max(total_samples, 1), {"loss": val_loss}
 
     def get_properties(self, config: dict) -> dict:
         return {"modality": self.pc.modality}
@@ -222,6 +243,7 @@ def build_proto_client(
             device=device,
             lr=lr,
         )
+        proto_cl._val_loader = val_loader
 
     elif modality == "audio":
         train_loader, val_loader = load_audio_data(
@@ -235,6 +257,7 @@ def build_proto_client(
             device=device,
             lr=lr,
         )
+        proto_cl._val_loader = val_loader
 
     elif modality == "alignment" or modality == "multimodal":
         (img_train, img_val), (aud_train, aud_val) = load_multimodal_data(
@@ -248,6 +271,9 @@ def build_proto_client(
             device=device,
             lr=lr,
         )
+        # For alignment evaluation, create a combined val_loader from both modalities
+        from torch.utils.data import ConcatDataset
+        proto_cl._val_loader = aud_val  # primary: audio val (has labels)
     else:
         raise ValueError(f"Unknown modality: {modality}")
 

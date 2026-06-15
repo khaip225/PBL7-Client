@@ -236,8 +236,8 @@ class FastAPIClient:
                 with open(config.STATE_FILE, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
                     self._state.update(loaded)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to load state from %s: %s", config.STATE_FILE, e)
 
     def _setup_signal_handlers(self):
         def _handler(signum, frame):
@@ -248,8 +248,8 @@ class FastAPIClient:
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
                 signal.signal(sig, _handler)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to register signal handler for %d: %s", sig, e)
 
 
 # Singleton

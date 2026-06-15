@@ -17,7 +17,7 @@ class Config:
     CLIENT_MODALITY: str = os.getenv("CLIENT_MODALITY", "audio")
 
     FLOWER_SERVER_ADDRESS: str = os.getenv("FLOWER_SERVER_ADDRESS", "")
-    CLIENT_API_KEY: str = os.getenv("CLIENT_API_KEY", "pbl7-client-api-key-change-in-production")
+    CLIENT_API_KEY: str = os.getenv("CLIENT_API_KEY", "")
 
     PREDICTION_THRESHOLD: float = float(os.getenv("PREDICTION_THRESHOLD", "0.5"))
     HEARTBEAT_INTERVAL: int = int(os.getenv("HEARTBEAT_INTERVAL", "30"))

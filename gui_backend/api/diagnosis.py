@@ -1,4 +1,5 @@
 import os
+import shutil
 import tempfile
 from fastapi import APIRouter, File, Form, Request, UploadFile, HTTPException
 from ..models.schemas import DiagnosisResponse
@@ -7,11 +8,23 @@ router = APIRouter()
 
 ALLOWED_IMAGE_EXT = {".png", ".jpg", ".jpeg"}
 ALLOWED_AUDIO_EXT = {".wav"}
+MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
 def _save_upload(upload: UploadFile, ext: str) -> str:
+    """Save upload to temp file with size limit, streaming to disk."""
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
-    tmp.write(upload.file.read())
+    total = 0
+    try:
+        while chunk := upload.file.read(8192):
+            total += len(chunk)
+            if total > MAX_UPLOAD_SIZE:
+                tmp.close()
+                os.unlink(tmp.name)
+                raise HTTPException(413, f"File exceeds max size of {MAX_UPLOAD_SIZE // (1024 * 1024)} MB")
+            tmp.write(chunk)
+    finally:
+        upload.file.close()
     tmp.close()
     return tmp.name
 

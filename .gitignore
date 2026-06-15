@@ -9,3 +9,6 @@ __pycache__/
 client_state.json
 *.log
 fl_worker/fl_data/
+Local_Data/pending/
+Local_Data/fl_data_*/
+tests/__pycache__/
