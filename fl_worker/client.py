@@ -15,19 +15,13 @@ Design matched to notebook pbl7-fl.ipynb (class FederatedClient).
 from __future__ import annotations
 
 import argparse
-import copy
-import json
 import os
 import sys
 import time
 from collections import OrderedDict
-from pathlib import Path
-from typing import Any
 
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
 
 import flwr as fl
 
@@ -271,9 +265,8 @@ def build_proto_client(
             device=device,
             lr=lr,
         )
-        # For alignment evaluation, create a combined val_loader from both modalities
-        from torch.utils.data import ConcatDataset
-        proto_cl._val_loader = aud_val  # primary: audio val (has labels)
+        # For alignment evaluation, use audio val (has labels)
+        proto_cl._val_loader = aud_val
     else:
         raise ValueError(f"Unknown modality: {modality}")
 

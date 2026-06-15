@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from ..models.schemas import (
     TrainingStartRequest, TrainingStartResponse, TrainingStopResponse,
-    TrainingStateResponse, AvailableJob,
+    TrainingStateResponse,
 )
 
 router = APIRouter()

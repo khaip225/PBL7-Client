@@ -1,4 +1,3 @@
-import json
 import os
 import signal
 import subprocess
@@ -7,48 +6,9 @@ from pathlib import Path
 
 from config import config
 from fl_worker.api_client import api_client
+from shared.fl_utils import resolve_fl_data_dir, check_data_for_modality
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-
-
-def _resolve_fl_data_dir() -> Path:
-    """Phân giải thư mục batch từ fl_state.json (khớp với monitor.py + dataset_loader.py)."""
-    import json as _json
-    base = Path(config.FL_DATA_DIR).resolve()
-    if base.name.startswith("fl_data_"):
-        return base
-
-    state_path = Path(__file__).resolve().parent.parent.parent / "local_managers" / "fl_state.json"
-    parent = base.parent if base.name.startswith("fl_data") else base
-    try:
-        if state_path.exists():
-            with open(state_path, "r", encoding="utf-8") as f:
-                state = _json.load(f)
-            batch = int(state.get("current_batch", 0))
-            if batch > 0:
-                resolved = parent / f"fl_data_{batch}"
-                if (resolved / "fl_image").exists() or (resolved / "fl_audio").exists():
-                    return resolved
-    except Exception as e:
-        print(f"[_resolve_fl_data_dir] Failed to read fl_state.json: {e}, falling back to {base}")
-    return base
-
-
-def _check_data_for_modality(modality: str) -> bool:
-    """Kiểm tra client có dữ liệu training cho modality này không."""
-    base = _resolve_fl_data_dir()
-    if modality == "audio":
-        csv_path = base / "metadata" / "audio_fl" / "client_1_train.csv"
-        return csv_path.exists()
-    elif modality == "image":
-        img_dir = base / "fl_image"
-        return img_dir.exists() and any(img_dir.iterdir())
-    elif modality == "alignment":
-        # Cần cả image và audio
-        has_img = (base / "fl_image").exists() and any((base / "fl_image").iterdir())
-        has_aud = (base / "metadata" / "audio_fl" / "client_1_train.csv").exists()
-        return has_img and has_aud
-    return False
 
 
 class TrainingService:
@@ -68,7 +28,7 @@ class TrainingService:
         raw = api_client.get_available_jobs()
         enriched = []
         for job in raw:
-            job["has_data"] = _check_data_for_modality(job.get("task_type", ""))
+            job["has_data"] = check_data_for_modality(resolve_fl_data_dir(), job.get("task_type", ""))
             enriched.append(job)
         return enriched
 

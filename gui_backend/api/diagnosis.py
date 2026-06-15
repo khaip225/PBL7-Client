@@ -1,5 +1,4 @@
 import os
-import shutil
 import tempfile
 from fastapi import APIRouter, File, Form, Request, UploadFile, HTTPException
 from ..models.schemas import DiagnosisResponse

@@ -9,9 +9,6 @@ class HealthResponse(BaseModel):
     client_id: str | None = None
 
 
-class DiagnosisRequest(BaseModel):
-    mode: str  # "fusion", "audio", "image"
-
 
 class ScoreDetail(BaseModel):
     audio_scores: dict | None = None    # {"Crackle": 0.7, "Wheeze": 0.1}

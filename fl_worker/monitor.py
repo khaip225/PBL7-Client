@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 import platform
@@ -11,28 +10,9 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_batch_dir(fl_data_dir: str) -> str:
-    """Phân giải thư mục batch từ fl_state.json, giống dataset_loader.py."""
-    base = Path(fl_data_dir).resolve()
-    # Nếu đã là thư mục batch (fl_data_X) thì dùng trực tiếp
-    if base.name.startswith("fl_data_"):
-        return str(base)
-
-    # Nếu là fl_data gốc, tìm batch hiện tại từ fl_state.json
-    parent = base.parent if base.name.startswith("fl_data") else base
-    state_path = Path(__file__).resolve().parent.parent / "local_managers" / "fl_state.json"
-    try:
-        if state_path.exists():
-            with open(state_path, "r", encoding="utf-8") as f:
-                state = json.load(f)
-            batch = int(state.get("current_batch", 0))
-            if batch > 0:
-                resolved = parent / f"fl_data_{batch}"
-                if resolved.exists():
-                    return str(resolved)
-    except Exception as e:
-        logger.warning("Failed to resolve batch dir from fl_state.json: %s, falling back to %s", e, base)
-
-    return str(base)
+    """Resolve current batch directory from fl_state.json."""
+    from shared.fl_utils import resolve_fl_data_dir
+    return str(resolve_fl_data_dir(base_dir=fl_data_dir))
 
 
 def scan_dataset_info(fl_data_dir: str = "./fl_worker/fl_data") -> dict:

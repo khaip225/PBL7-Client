@@ -9,7 +9,6 @@ The audio dataset returns raw mel-spectrogram (log-mel) for AST input.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from pathlib import Path
@@ -30,30 +29,9 @@ from config import config
 # ---------------------------------------------------------------------------
 # FL state helper
 # ---------------------------------------------------------------------------
-
-def _load_fl_state(state_file: Path) -> dict:
-    if not state_file.exists():
-        return {"current_batch": 0}
-    try:
-        with state_file.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {"current_batch": 0}
-
-
 def _resolve_fl_base_dir(base_dir: str | None = None, state_file: str | None = None) -> str:
-    base = Path(base_dir or config.FL_DATA_DIR).resolve()
-    if base.name.startswith("fl_data_"):
-        return str(base)
-
-    parent = base.parent if base.name.startswith("fl_data") else base
-    state_path = Path(state_file or (Path(__file__).resolve().parent.parent / "local_managers" / "fl_state.json"))
-    state = _load_fl_state(state_path)
-    batch = int(state.get("current_batch", 0))
-
-    if batch <= 0:
-        return str(parent / "fl_data")
-    return str(parent / f"fl_data_{batch}")
+    from shared.fl_utils import resolve_fl_data_dir
+    return str(resolve_fl_data_dir(base_dir=base_dir, state_file=state_file))
 
 
 # ---------------------------------------------------------------------------
