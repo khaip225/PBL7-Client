@@ -20,7 +20,7 @@ export default function HistoryDetail({ item, onClose }: Props) {
         <X size={18} />
       </button>
 
-      <h3 className="text-sm font-semibold text-gray-300 mb-4">Chi tiết</h3>
+      <h3 className="text-sm font-semibold text-gray-300 mb-4">Details</h3>
 
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 text-sm">
@@ -29,11 +29,11 @@ export default function HistoryDetail({ item, onClose }: Props) {
             <p className="text-gray-300 font-mono text-xs">{item.id}</p>
           </div>
           <div>
-            <span className="text-gray-500">Thời gian:</span>
+            <span className="text-gray-500">Time:</span>
             <p className="text-gray-300">{item.timestamp}</p>
           </div>
           <div className="col-span-2">
-            <span className="text-gray-500">Kết quả:</span>
+            <span className="text-gray-500">Result:</span>
             <div className="flex flex-wrap gap-1.5 mt-1">
               {displayLabels.map((label) => (
                 <span
@@ -66,7 +66,7 @@ export default function HistoryDetail({ item, onClose }: Props) {
 
         {(item.image_file || item.image_path) && (
           <div>
-            <p className="text-xs text-gray-500 mb-2">Ảnh X-quang</p>
+            <p className="text-xs text-gray-500 mb-2">X-ray Image</p>
             <img
               src={api.history.imageUrl(item.id)}
               alt="X-quang"

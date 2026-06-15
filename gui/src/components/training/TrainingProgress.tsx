@@ -21,7 +21,7 @@ export default function TrainingProgress({
   return (
     <div className="card space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-300">Tiến trình</h3>
+        <h3 className="text-sm font-semibold text-gray-300">Progress</h3>
         <span
           className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
             trainingActive
@@ -34,7 +34,7 @@ export default function TrainingProgress({
       </div>
       <div className="flex items-end gap-2">
         <span className="text-3xl font-bold text-white">{currentRound}</span>
-        <span className="text-lg text-gray-500">/ {totalRounds} vòng</span>
+        <span className="text-lg text-gray-500">/ {totalRounds} rounds</span>
       </div>
       <div className="h-2 rounded-full bg-gray-800 overflow-hidden">
         <div

@@ -14,7 +14,7 @@ export function useHistory() {
       setData(res);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Lỗi tải lịch sử");
+      setError(e instanceof Error ? e.message : "History load error");
     } finally {
       setLoading(false);
     }

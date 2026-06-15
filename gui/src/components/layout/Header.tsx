@@ -13,7 +13,7 @@ export default function Header() {
       </div>
       <div className="flex items-center gap-2">
         <span className="flex h-2 w-2 rounded-full bg-green-400" />
-        <span className="text-xs text-gray-500">Đã kết nối</span>
+        <span className="text-xs text-gray-500">Connected</span>
       </div>
     </header>
   );

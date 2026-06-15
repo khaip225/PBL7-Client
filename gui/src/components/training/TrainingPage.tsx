@@ -36,7 +36,7 @@ export default function TrainingPage() {
     return (
       <div className="flex items-center gap-2 text-gray-400">
         <Loader2 size={18} className="animate-spin" />
-        Đang tải trạng thái...
+        Loading state...
       </div>
     );
   }

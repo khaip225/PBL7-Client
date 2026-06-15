@@ -44,7 +44,7 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
       setSelectedJobId(null);
       onStateChange();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Lỗi bắt đầu training");
+      setError(e instanceof Error ? e.message : "Training start error");
     } finally {
       setLoading(false);
     }
@@ -57,25 +57,25 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
       await api.training.stop();
       onStateChange();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Lỗi dừng training");
+      setError(e instanceof Error ? e.message : "Training stop error");
     } finally {
       setLoading(false);
     }
   };
 
   const taskTypeLabel = (t: string) =>
-    t === "audio" ? "Âm thanh" : t === "image" ? "Hình ảnh" : t === "alignment" ? "Đa phương thức" : t;
+    t === "audio" ? "Audio" : t === "image" ? "Image" : t === "alignment" ? "Multimodal" : t;
 
   return (
     <div className="card space-y-4">
-      <h3 className="text-sm font-semibold text-gray-300">Điều khiển</h3>
+      <h3 className="text-sm font-semibold text-gray-300">Controls</h3>
 
       {/* Job invitations from VPS */}
       {!trainingActive && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-500">
-              {jobsLoading ? "Đang tìm job..." : `${availableJobs.length} job khả dụng`}
+              {jobsLoading ? "Finding jobs..." : `${availableJobs.length} job(s) available`}
             </span>
             {jobsLoading && <Loader2 size={12} className="animate-spin text-gray-500" />}
           </div>
@@ -104,7 +104,7 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
 
                   <div className="flex items-center gap-3 text-xs text-gray-400">
                     <span className="flex items-center gap-1">
-                      <Radio size={12} /> {job.num_rounds} vòng
+                      <Radio size={12} /> {job.num_rounds} rounds
                     </span>
                     <span className="flex items-center gap-1">
                       <Users size={12} /> {job.joined_clients.length}/{job.min_clients}
@@ -115,7 +115,7 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
                   </div>
 
                   <div className="text-xs text-gray-500">
-                    Chiến lược: {job.strategy}
+                    Strategy: {job.strategy}
                   </div>
 
                   {job.has_data ? (
@@ -125,11 +125,11 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
                       className="w-full btn-primary flex items-center justify-center gap-2 text-sm py-1.5"
                     >
                       <Play size={14} />
-                      Tham gia
+                      Join
                     </button>
                   ) : (
                     <div className="text-center text-xs text-red-400 py-1">
-                      Không có dữ liệu {taskTypeLabel(job.task_type)}
+                      No data for {taskTypeLabel(job.task_type)}
                     </div>
                   )}
                 </div>
@@ -139,7 +139,7 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
 
           {availableJobs.length === 0 && !jobsLoading && (
             <div className="text-center py-3 text-xs text-gray-500">
-              Không có job training nào từ server
+              No training jobs from server
             </div>
           )}
 
@@ -150,7 +150,7 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
               className="w-full btn-primary flex items-center justify-center gap-2 text-sm py-1.5 mt-3"
             >
               <Play size={14} />
-              Bắt đầu training thủ công
+              Start manual training
             </button>
           )}
 
@@ -159,7 +159,7 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
             <div className="rounded-lg border border-gray-700 bg-gray-800/50 p-3 space-y-3 mt-3">
               {selectedJobId && (
                 <div className="text-xs text-blue-400 bg-blue-900/20 rounded px-2 py-1">
-                  📡 Tham gia job từ VPS (ID: {selectedJobId.slice(0, 8)}...)
+                  📡 Join job from VPS (ID: {selectedJobId.slice(0, 8)}...)
                 </div>
               )}
 
@@ -170,13 +170,13 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
                   onChange={(e) => setModality(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-white"
                 >
-                  <option value="image">Hình ảnh (X-quang)</option>
-                  <option value="audio">Âm thanh (Phổi)</option>
-                  <option value="alignment">Đa phương thức (Alignment)</option>
+                  <option value="image">Image (X-ray)</option>
+                  <option value="audio">Audio (Lung)</option>
+                  <option value="alignment">Multimodal (Alignment)</option>
                 </select>
               </div>
               <div>
-                <label className="text-xs text-gray-400">Số vòng (rounds)</label>
+                <label className="text-xs text-gray-400">Rounds</label>
                 <input
                   type="number"
                   min={1}
@@ -187,7 +187,7 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
                 />
               </div>
               <div>
-                <label className="text-xs text-gray-400">Epoch mỗi vòng</label>
+                <label className="text-xs text-gray-400">Epochs per round</label>
                 <input
                   type="number"
                   min={1}
@@ -204,13 +204,13 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
                   className="btn-primary flex items-center gap-2"
                 >
                   {loading && <Loader2 size={14} className="animate-spin" />}
-                  {selectedJobId ? "Tham gia" : "Xác nhận"}
+                  {selectedJobId ? "Join" : "Confirm"}
                 </button>
                 <button
                   onClick={() => { setShowForm(false); setSelectedJobId(null); }}
                   className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
                 >
-                  Hủy
+                  Cancel
                 </button>
               </div>
             </div>
@@ -223,7 +223,7 @@ export default function TrainingControls({ trainingActive, onStateChange, availa
         <button onClick={handleStop} disabled={loading} className="btn-danger flex items-center gap-2 w-full justify-center">
           {loading && <Loader2 size={14} className="animate-spin" />}
           <Square size={14} />
-          Dừng Training
+          Stop Training
         </button>
       )}
 

@@ -30,7 +30,7 @@ export interface RetrievalItem {
 export interface LateFusionResultDetail {
   primary_diagnosis: string;
   confidence: number;
-  confidence_level: string;   // "Rất cao" / "Cao" / "Trung bình" / "Thấp"
+  confidence_level: string;   // "Very High" / "High" / "Medium" / "Low"
   agreement: string;
   fusion_scores: ClassProbabilities;
   is_normal: boolean;

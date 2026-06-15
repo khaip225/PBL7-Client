@@ -2,9 +2,9 @@ import { Layers, Image, Mic } from "lucide-react";
 import type { DiagnosisMode } from "../../hooks/useDiagnosis";
 
 const modes: { id: DiagnosisMode; label: string; desc: string; icon: typeof Layers }[] = [
-  { id: "fusion", label: "Fusion", desc: "Kết hợp X-quang & Audio", icon: Layers },
-  { id: "image", label: "X-quang", desc: "Chỉ dùng ảnh X-quang", icon: Image },
-  { id: "audio", label: "Audio", desc: "Chỉ dùng file âm thanh", icon: Mic },
+  { id: "fusion", label: "Fusion", desc: "Combined X-ray & Audio", icon: Layers },
+  { id: "image", label: "X-ray", desc: "X-ray image only", icon: Image },
+  { id: "audio", label: "Audio", desc: "Audio file only", icon: Mic },
 ];
 
 interface Props {

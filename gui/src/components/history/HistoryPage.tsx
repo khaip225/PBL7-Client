@@ -17,16 +17,16 @@ export default function HistoryPage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-white">Lịch sử Chẩn đoán</h2>
+        <h2 className="text-xl font-bold text-white">Diagnosis History</h2>
         <p className="text-sm text-gray-400 mt-1">
-          Xem lại các lần chẩn đoán trước đây.
+          Review previous diagnoses.
         </p>
       </div>
 
       {loading && !data && (
         <div className="flex items-center gap-2 text-gray-400">
           <Loader2 size={18} className="animate-spin" />
-          Đang tải...
+          Loading...
         </div>
       )}
 
@@ -48,7 +48,7 @@ export default function HistoryPage() {
               {data.total > data.page_size && (
                 <div className="flex items-center justify-between mt-4 text-sm">
                   <span className="text-gray-500">
-                    Tổng: {data.total} | Trang {data.page}
+                    Total: {data.total} | Page {data.page}
                   </span>
                   <div className="flex gap-2">
                     <button
@@ -56,14 +56,14 @@ export default function HistoryPage() {
                       onClick={() => setPage((p) => p - 1)}
                       className="rounded-lg px-3 py-1.5 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-30"
                     >
-                      Trước
+                      Prev
                     </button>
                     <button
                       disabled={page * data.page_size >= data.total}
                       onClick={() => setPage((p) => p + 1)}
                       className="rounded-lg px-3 py-1.5 text-gray-400 hover:text-white hover:bg-gray-800 disabled:opacity-30"
                     >
-                      Sau
+                      Next
                     </button>
                   </div>
                 </div>

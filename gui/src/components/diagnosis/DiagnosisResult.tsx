@@ -23,9 +23,9 @@ function cn(...c: (string | false | undefined)[]) { return c.filter(Boolean).joi
 
 function confidenceColor(level: string): string {
   switch (level) {
-    case "Rất cao": return "#22c55e";
-    case "Cao": return "#3b82f6";
-    case "Trung bình": return "#f97316";
+    case "Very High": return "#22c55e";
+    case "High": return "#3b82f6";
+    case "Medium": return "#f97316";
     default: return "#ef4444";
   }
 }
@@ -67,7 +67,7 @@ export default function DiagnosisResult({ result, compact }: Props) {
       {/* Tiêu đề nhỏ */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-white">
-          Kết quả — {isImage ? "Ảnh X-quang" : isAudio ? "Âm thanh" : "Fusion"}
+          Result — {isImage ? "X-ray" : isAudio ? "Audio" : "Fusion"}
         </h3>
         <span className="text-[10px] text-gray-500">{result.timestamp}</span>
       </div>
@@ -78,14 +78,14 @@ export default function DiagnosisResult({ result, compact }: Props) {
         <div className="rounded-lg border border-blue-500/25 bg-blue-500/5 p-3">
           <div className="flex items-center gap-2 mb-2">
             <span className="w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold flex items-center justify-center">1</span>
-            <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1"><Brain size={12} /> Phân loại</span>
+            <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1"><Brain size={12} /> Classification</span>
           </div>
 
           {/* Tags */}
           <div className="flex flex-wrap gap-1 mb-2">
             {allNormal ? (
               <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium bg-green-600/15 text-green-400 border border-green-600/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-400" /> Bình thường
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400" /> Normal
               </span>
             ) : (
               labels.map((lbl) => (
@@ -103,14 +103,14 @@ export default function DiagnosisResult({ result, compact }: Props) {
           {isImage && image_scores && DISEASE_NAMES.map(n =>
             <MiniBar key={n} name={n} value={image_scores[n] ?? 0} color={DISEASE_COLORS[n]} />)}
           {isImage && audio_scores &&
-            <div className="text-[10px] text-gray-500 mt-1 mb-0.5">🔊 Âm thanh (suy luận):</div>}
+            <div className="text-[10px] text-gray-500 mt-1 mb-0.5">🔊 Audio (inferred):</div>}
           {isImage && audio_scores && ACOUSTIC_NAMES.map(n =>
             <MiniBar key={n} name={n} value={audio_scores[n] ?? 0} color={ACOUSTIC_COLORS[n]} />)}
 
           {isAudio && audio_scores && ACOUSTIC_NAMES.map(n =>
             <MiniBar key={n} name={n} value={audio_scores[n] ?? 0} color={ACOUSTIC_COLORS[n]} />)}
           {isAudio && image_scores &&
-            <div className="text-[10px] text-gray-500 mt-1 mb-0.5">🫁 Bệnh (suy luận):</div>}
+            <div className="text-[10px] text-gray-500 mt-1 mb-0.5">🫁 Disease (inferred):</div>}
           {isAudio && image_scores && DISEASE_NAMES.map(n =>
             <MiniBar key={n} name={n} value={image_scores[n] ?? 0} color={DISEASE_COLORS[n]} />)}
         </div>
@@ -123,7 +123,7 @@ export default function DiagnosisResult({ result, compact }: Props) {
               : "border-orange-500/25 bg-orange-500/5")}>
             <div className="flex items-center gap-2 mb-2">
               <span className="w-5 h-5 rounded-full bg-orange-500/20 text-orange-400 text-[10px] font-bold flex items-center justify-center">5</span>
-              <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1"><Layers size={12} /> Kết luận Late Fusion</span>
+              <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1"><Layers size={12} /> Late Fusion Conclusion</span>
             </div>
             <LateFusionBox data={result.late_fusion} />
           </div>
@@ -135,7 +135,7 @@ export default function DiagnosisResult({ result, compact }: Props) {
         <div className="rounded-lg border border-cyan-500/25 bg-cyan-500/5 p-3">
           <div className="flex items-center gap-2 mb-2">
             <span className="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-400 text-[10px] font-bold flex items-center justify-center">2</span>
-            <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1"><Lightbulb size={12} /> Zero-shot Liên Modal</span>
+            <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1"><Lightbulb size={12} /> Cross-Modal Zero-shot</span>
           </div>
           <div className="rounded bg-cyan-500/10 border border-cyan-500/20 p-2.5">
             <p className="text-[11px] text-cyan-300 leading-relaxed">{result.cross_modal.message}</p>
@@ -152,7 +152,7 @@ export default function DiagnosisResult({ result, compact }: Props) {
         <div className="rounded-lg border border-purple-500/25 bg-purple-500/5 p-3">
           <div className="flex items-center gap-2 mb-2">
             <span className="w-5 h-5 rounded-full bg-purple-500/20 text-purple-400 text-[10px] font-bold flex items-center justify-center">3</span>
-            <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1"><Search size={12} /> Truy xuất bằng chứng</span>
+            <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1"><Search size={12} /> Evidence Retrieval</span>
           </div>
           {isImage ? (
             <div className="space-y-1.5">
@@ -171,7 +171,7 @@ export default function DiagnosisResult({ result, compact }: Props) {
         <div className="rounded-lg border border-orange-500/25 bg-orange-500/5 p-3">
           <div className="flex items-center gap-2 mb-2">
             <span className="w-5 h-5 rounded-full bg-orange-500/20 text-orange-400 text-[10px] font-bold flex items-center justify-center">4</span>
-            <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1"><Search size={12} /> Giải thích (XAI)</span>
+            <span className="text-[11px] font-semibold text-gray-300 flex items-center gap-1"><Search size={12} /> Explanation (XAI)</span>
           </div>
           <div className="grid grid-cols-2 gap-2">
             {result.heatmap_path &&
@@ -196,7 +196,7 @@ function LateFusionBox({ data }: { data: LateFusionResultDetail }) {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold"
             style={{ backgroundColor: cc + "20", color: cc }}>
-            {data.is_normal ? "✅ Bình thường" : "⚠️ " + data.primary_diagnosis}
+            {data.is_normal ? "✅ Normal" : "⚠️ " + data.primary_diagnosis}
           </span>
           <span className="text-[10px] text-gray-500">{data.agreement}</span>
         </div>

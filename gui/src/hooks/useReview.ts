@@ -15,7 +15,7 @@ export function useReview() {
       setData(res);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Loi tai danh sach pending");
+      setError(e instanceof Error ? e.message : "Pending list load error");
     } finally {
       setLoading(false);
     }
@@ -26,7 +26,7 @@ export function useReview() {
       const res = await api.review.getState();
       setState(res);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Loi tai trang thai batch");
+      setError(e instanceof Error ? e.message : "Batch state load error");
     }
   }, []);
 

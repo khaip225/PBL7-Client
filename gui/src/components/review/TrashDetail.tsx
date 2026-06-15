@@ -45,7 +45,7 @@ export default function TrashDetail({ item, onRestore, onDelete, onClose }: Prop
 
       <h3 className="text-sm font-semibold text-gray-300 mb-4 flex items-center gap-2">
         <Trash2 size={16} className="text-yellow-500" />
-        Chi tiết trong thùng rác
+        Trash Details
       </h3>
 
       <div className="space-y-4">
@@ -55,11 +55,11 @@ export default function TrashDetail({ item, onRestore, onDelete, onClose }: Prop
             <p className="text-gray-300 font-mono text-xs break-all">{item.id}</p>
           </div>
           <div>
-            <span className="text-gray-500">Thời gian:</span>
+            <span className="text-gray-500">Time:</span>
             <p className="text-gray-300">{item.timestamp}</p>
           </div>
           <div className="col-span-2">
-            <span className="text-gray-500">Nhãn AI dự đoán:</span>
+            <span className="text-gray-500">AI Predicted Label:</span>
             <div className="flex flex-wrap gap-1.5 mt-1">
               {displayLabels.map((label) => (
                 <span
@@ -92,7 +92,7 @@ export default function TrashDetail({ item, onRestore, onDelete, onClose }: Prop
 
         {(item.image_file || item.image_path) && (
           <div>
-            <p className="text-xs text-gray-500 mb-2">Ảnh X-quang</p>
+            <p className="text-xs text-gray-500 mb-2">X-ray Image</p>
             <img
               src={api.review.trashImageUrl(item.id)}
               alt="X-quang"
@@ -116,7 +116,7 @@ export default function TrashDetail({ item, onRestore, onDelete, onClose }: Prop
             className="w-full rounded-lg bg-green-600 px-3 py-2 text-sm font-semibold text-white hover:bg-green-500 disabled:opacity-60 flex items-center justify-center gap-2"
           >
             <RotateCcw size={14} />
-            {restoring ? "Đang khôi phục..." : "Khôi phục về pending"}
+            {restoring ? "Restoring..." : "Restore to Pending"}
           </button>
           <button
             onClick={handleDelete}
@@ -124,7 +124,7 @@ export default function TrashDetail({ item, onRestore, onDelete, onClose }: Prop
             className="w-full rounded-lg border border-red-600/30 bg-red-600/10 px-3 py-2 text-sm font-semibold text-red-400 hover:bg-red-600/20 disabled:opacity-60 flex items-center justify-center gap-2"
           >
             <Trash2 size={14} />
-            {deleting ? "Đang xóa..." : "Xóa vĩnh viễn"}
+            {deleting ? "Deleting..." : "Delete Permanently"}
           </button>
         </div>
       </div>

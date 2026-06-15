@@ -75,7 +75,7 @@ export const api = {
         `/api/review/${recordId}/reject`,
         { method: "POST" }
       ),
-    /** Thùng rác */
+    /** Trash */
     listTrash: () =>
       request<HistoryRecord[]>("/api/review/trash"),
     restoreFromTrash: (recordId: string) =>

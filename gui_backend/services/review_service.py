@@ -100,7 +100,7 @@ class ReviewService:
             db = np.load(db_path, allow_pickle=True).item()
             # Skip nếu case_id đã tồn tại
             if case_id in db.get("case_ids", []):
-                return {"status": "skipped", "reason": f"case_id '{case_id}' đã tồn tại", "total": len(db["case_ids"])}
+                return {"status": "skipped", "reason": f"case_id '{case_id}' already exists", "total": len(db["case_ids"])}
         else:
             db = {"embeddings": np.empty((0, 256), dtype=np.float32), "files": [],
                   "labels": [], "case_ids": []}

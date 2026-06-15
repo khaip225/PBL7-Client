@@ -29,7 +29,7 @@ export function useDiagnosis() {
       const data = await api.diagnosis.run(fd);
       setResult(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Lỗi chẩn đoán");
+      setError(e instanceof Error ? e.message : "Diagnosis error");
     } finally {
       setLoading(false);
     }

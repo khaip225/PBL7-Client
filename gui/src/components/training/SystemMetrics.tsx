@@ -8,7 +8,7 @@ interface Props {
 export default function SystemMetrics({ metrics }: Props) {
   return (
     <div className="card space-y-4">
-      <h3 className="text-sm font-semibold text-gray-300">Hệ thống</h3>
+      <h3 className="text-sm font-semibold text-gray-300">System</h3>
       <div className="space-y-3">
         <MetricBar label="CPU" value={metrics.cpu_percent} color="blue" />
         <MetricBar label="RAM" value={metrics.ram_percent} color="yellow" />

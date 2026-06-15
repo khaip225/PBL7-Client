@@ -50,9 +50,9 @@ export default function DiagnosisPage() {
       {/* ── Header ───────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-white">Chẩn đoán Bệnh Lý Phổi</h2>
+          <h2 className="text-xl font-bold text-white">Lung Disease Diagnosis</h2>
           <p className="text-sm text-gray-400 mt-0.5">
-            Upload ảnh X-quang hoặc audio để phân tích đa phương thức
+            Upload X-ray image or audio for multimodal analysis
           </p>
         </div>
 
@@ -73,7 +73,7 @@ export default function DiagnosisPage() {
                 : subTab === "result" ? "bg-gray-700 text-white shadow" : "text-gray-400 hover:text-gray-200"
             }`}
           >
-            <FileSearch size={14} /> Kết quả chi tiết
+            <FileSearch size={14} /> Detailed Results
           </button>
         </div>
       </div>
@@ -98,8 +98,8 @@ export default function DiagnosisPage() {
                   d.mode === m ? "bg-blue-600 text-white shadow" : "text-gray-400 hover:text-gray-200"
                 }`}
               >
-                {m === "image" && <><Image size={14} /> Ảnh X-quang</>}
-                {m === "audio" && <><Mic size={14} /> Âm thanh</>}
+                {m === "image" && <><Image size={14} /> X-ray</>}
+                {m === "audio" && <><Mic size={14} /> Audio</>}
                 {m === "fusion" && <><Image size={14} />+<Mic size={14} /> Fusion</>}
               </button>
             ))}
@@ -110,7 +110,7 @@ export default function DiagnosisPage() {
             {(isImage || isFusion) && (
               <UploadBox
                 icon={<Image size={22} />}
-                label="Ảnh X-quang"
+                label="X-ray"
                 accept="image/*"
                 file={d.imageFile}
                 onChange={d.setImageFile}
@@ -137,9 +137,9 @@ export default function DiagnosisPage() {
             <button onClick={d.run} disabled={!d.canSubmit}
               className="btn-primary flex items-center gap-2">
               {d.loading && <Loader2 size={16} className="animate-spin" />}
-              {d.loading ? "Đang chẩn đoán..." : "Chẩn đoán"}
+              {d.loading ? "Diagnosing..." : "Diagnose"}
             </button>
-            {d.result && <button onClick={d.reset} className="btn-danger">Đặt lại</button>}
+            {d.result && <button onClick={d.reset} className="btn-danger">Reset</button>}
           </div>
         </div>
       )}
@@ -150,7 +150,7 @@ export default function DiagnosisPage() {
           {/* Cột 1: Ảnh gốc + Heatmap + Attention */}
           <div className="space-y-3">
             {d.imageUrl && (
-              <ImageCard title="Ảnh X-quang gốc" src={d.imageUrl!} onZoom={() => setLightboxSrc(d.imageUrl!)} />
+              <ImageCard title="Original X-ray" src={d.imageUrl!} onZoom={() => setLightboxSrc(d.imageUrl!)} />
             )}
             {hmUrl && (
               <ImageCard title="Grad-CAM Heatmap" src={hmUrl!} onZoom={() => setLightboxSrc(hmUrl!)} borderColor="border-blue-500/40" />
@@ -160,7 +160,7 @@ export default function DiagnosisPage() {
             )}
             {d.audioUrl && (
               <div className="rounded-lg border border-gray-700 bg-gray-900/30 p-3">
-                <p className="text-[11px] text-gray-500 uppercase tracking-wide mb-2">Audio đã upload</p>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wide mb-2">Uploaded Audio</p>
                 <audio src={d.audioUrl} controls className="w-full h-8" />
               </div>
             )}
@@ -217,7 +217,7 @@ function UploadBox({ icon, label, accept, file, onChange, preview, disabled, isA
         <>
           <div className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-400">{icon}</div>
           <p className="text-sm text-gray-400">{label}</p>
-          <p className="text-xs text-gray-600">Click để chọn file</p>
+          <p className="text-xs text-gray-600">Click to select file</p>
         </>
       )}
     </div>

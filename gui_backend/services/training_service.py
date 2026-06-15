@@ -47,7 +47,7 @@ class TrainingService:
             # Flow mới: join job trên VPS trước
             join_result = api_client.join_job(job_id)
             if not join_result:
-                raise RuntimeError("Không thể tham gia job training trên server")
+                raise RuntimeError("Unable to join training job on server")
             server_address = join_result.get("server_address", server_address)
             modality = join_result.get("task_type", modality)
             total_rounds = join_result.get("num_rounds", total_rounds)

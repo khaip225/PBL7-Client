@@ -37,8 +37,8 @@ export default function AudioPlayer({ url }: Props) {
         {playing ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
       </button>
       <div>
-        <p className="text-sm text-gray-300">File audio đã tải lên</p>
-        <p className="text-xs text-gray-500">{playing ? "Đang phát..." : "Sẵn sàng"}</p>
+        <p className="text-sm text-gray-300">Audio file uploaded</p>
+        <p className="text-xs text-gray-500">{playing ? "Playing..." : "Ready"}</p>
       </div>
     </div>
   );

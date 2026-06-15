@@ -16,7 +16,7 @@ export function useTrainingState() {
       setState(data);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Lỗi kết nối backend");
+      setError(e instanceof Error ? e.message : "Backend connection error");
     } finally {
       setLoading(false);
     }

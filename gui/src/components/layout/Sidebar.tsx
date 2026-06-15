@@ -2,11 +2,11 @@ import { Stethoscope, Brain, Clock, ClipboardCheck, Trash2 } from "lucide-react"
 import type { Tab } from "./AppShell";
 
 const items: { id: Tab; label: string; icon: typeof Stethoscope }[] = [
-  { id: "diagnosis", label: "Chẩn đoán", icon: Stethoscope },
+  { id: "diagnosis", label: "Diagnosis", icon: Stethoscope },
   { id: "training", label: "FL Training", icon: Brain },
-  { id: "review", label: "Duyệt dữ liệu", icon: ClipboardCheck },
-  { id: "history", label: "Lịch sử", icon: Clock },
-  { id: "trash", label: "Thùng rác", icon: Trash2 },
+  { id: "review", label: "Review Data", icon: ClipboardCheck },
+  { id: "history", label: "History", icon: Clock },
+  { id: "trash", label: "Trash", icon: Trash2 },
 ];
 
 interface Props {

@@ -20,7 +20,7 @@ export default function DatasetCard({ dataset }: Props) {
     <div className="card space-y-3">
       <h3 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
         <Database size={14} />
-        Dữ liệu huấn luyện
+        Training Data
       </h3>
 
       <div className="space-y-2">
@@ -28,7 +28,7 @@ export default function DatasetCard({ dataset }: Props) {
           <div className="flex items-center justify-between text-sm">
             <span className="flex items-center gap-1.5 text-gray-400">
               <ImageIcon size={14} className="text-blue-400" />
-              Hình ảnh
+              Images
             </span>
             <span className="font-mono text-white">{ds.image_samples.toLocaleString()}</span>
           </div>
@@ -38,20 +38,20 @@ export default function DatasetCard({ dataset }: Props) {
           <div className="flex items-center justify-between text-sm">
             <span className="flex items-center gap-1.5 text-gray-400">
               <Music size={14} className="text-purple-400" />
-              Âm thanh
+              Audio
             </span>
             <span className="font-mono text-white">{ds.audio_samples.toLocaleString()}</span>
           </div>
         )}
 
         <div className="flex items-center justify-between text-sm pt-2 border-t border-gray-800">
-          <span className="text-gray-500">Tổng</span>
+          <span className="text-gray-500">Total</span>
           <span className="font-mono text-white font-semibold">{ds.total_samples.toLocaleString()} samples</span>
         </div>
 
         {!ds.has_audio && !ds.has_image && (
           <div className="text-center py-2 text-xs text-yellow-400">
-            Chưa có dữ liệu huấn luyện
+            No training data yet
           </div>
         )}
       </div>

@@ -57,7 +57,7 @@ export default function FileUploader({ file, onChange, accept, label, icon }: Pr
         >
           <Upload size={24} className="text-gray-500" />
           <span className="text-sm text-gray-400">
-            Kéo thả hoặc <span className="text-blue-400">chọn file</span>
+            Drag & drop or <span className="text-blue-400">browse files</span>
           </span>
           <span className="text-xs text-gray-600">{acceptLabels[accept] ?? accept}</span>
           <input

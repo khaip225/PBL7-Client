@@ -11,7 +11,7 @@ export default function ReviewTable({ items, onSelect, selectedId }: Props) {
   if (items.length === 0) {
     return (
       <div className="card text-center text-gray-500 py-10">
-        Không có dữ liệu pending.
+        No pending data.
       </div>
     );
   }
@@ -22,8 +22,8 @@ export default function ReviewTable({ items, onSelect, selectedId }: Props) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-800 bg-gray-900/50">
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Thời gian</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Nhãn gợi ý</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Time</th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Suggested Label</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Mode</th>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">Confidence</th>
             </tr>

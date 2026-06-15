@@ -58,7 +58,7 @@ export default function ReviewDetail({ item, onApprove, onReject, onClose }: Pro
         <X size={18} />
       </button>
 
-      <h3 className="text-sm font-semibold text-gray-300 mb-4">Duyệt hồ sơ</h3>
+      <h3 className="text-sm font-semibold text-gray-300 mb-4">Review Record</h3>
 
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 text-sm">
@@ -67,11 +67,11 @@ export default function ReviewDetail({ item, onApprove, onReject, onClose }: Pro
             <p className="text-gray-300 font-mono text-xs break-all">{item.id}</p>
           </div>
           <div>
-            <span className="text-gray-500">Thời gian:</span>
+            <span className="text-gray-500">Time:</span>
             <p className="text-gray-300">{item.timestamp}</p>
           </div>
           <div>
-            <span className="text-gray-500">Nhãn gợi ý:</span>
+            <span className="text-gray-500">AI Suggestion:</span>
             <div className="flex flex-wrap gap-1 mt-1">
               {suggestedLabels.map((label) => (
                 <span
@@ -96,7 +96,7 @@ export default function ReviewDetail({ item, onApprove, onReject, onClose }: Pro
 
         {(item.image_file || item.image_path) && (
           <div>
-            <p className="text-xs text-gray-500 mb-2">Ảnh X-quang</p>
+            <p className="text-xs text-gray-500 mb-2">X-ray Image</p>
             <img
               src={api.history.imageUrl(item.id)}
               alt="X-quang"
@@ -114,12 +114,12 @@ export default function ReviewDetail({ item, onApprove, onReject, onClose }: Pro
 
         {/* Multi-label checkboxes */}
         <div className="rounded-lg border border-gray-800 bg-gray-900/40 p-3">
-          <p className="text-xs text-gray-500 mb-3">Chọn nhãn chốt</p>
+          <p className="text-xs text-gray-500 mb-3">Select final labels</p>
 
           <div className="space-y-3">
             {/* Diseases */}
             <div>
-              <p className="text-xs text-gray-600 mb-1.5">🫁 Bệnh phổi</p>
+              <p className="text-xs text-gray-600 mb-1.5">🫁 Lung Diseases</p>
               <div className="flex flex-wrap gap-2">
                 {["Pneumonia", "COPD_Emphysema", "Fibrosis"].map((name) => (
                   <label
@@ -148,7 +148,7 @@ export default function ReviewDetail({ item, onApprove, onReject, onClose }: Pro
 
             {/* Acoustic */}
             <div>
-              <p className="text-xs text-gray-600 mb-1.5">🔊 Dấu hiệu âm thanh</p>
+              <p className="text-xs text-gray-600 mb-1.5">🔊 Acoustic Signs</p>
               <div className="flex flex-wrap gap-2">
                 {["Crackle", "Wheeze"].map((name) => (
                   <label
@@ -182,7 +182,7 @@ export default function ReviewDetail({ item, onApprove, onReject, onClose }: Pro
           disabled={saving}
           className="w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
         >
-          {saving ? "Đang đồng bộ..." : "Lưu và đồng bộ"}
+          {saving ? "Saving..." : "Save & Sync"}
         </button>
 
         {onReject && (
@@ -191,7 +191,7 @@ export default function ReviewDetail({ item, onApprove, onReject, onClose }: Pro
             disabled={deleting}
             className="w-full rounded-lg border border-yellow-600/30 bg-yellow-600/10 px-3 py-2 text-sm font-semibold text-yellow-400 hover:bg-yellow-600/20 disabled:opacity-60"
           >
-            {deleting ? "Đang chuyển..." : "Bỏ vào thùng rác"}
+            {deleting ? "Moving..." : "Move to Trash"}
           </button>
         )}
       </div>

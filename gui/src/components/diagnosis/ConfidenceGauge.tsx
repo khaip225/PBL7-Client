@@ -69,7 +69,7 @@ export default function ConfidenceGauge({ value, threshold, size = 160 }: Props)
           className="fill-gray-500"
           fontSize={size * 0.06}
         >
-          Ngưỡng: {(threshold * 100).toFixed(0)}%
+          Threshold: {(threshold * 100).toFixed(0)}%
         </text>
       </svg>
     </div>
