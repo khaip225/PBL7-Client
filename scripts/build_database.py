@@ -110,7 +110,7 @@ def build_database(data_dir: str, output_path: str, mode: str, engine: PipelineE
                 label = {"acoustic": max(probs, key=probs.get)}
 
             embeddings.append(emb)
-            file_paths.append(file_str)
+            file_paths.append(os.path.relpath(file_str, BASE_DIR))
             labels_list.append(label)
             case_ids.append(case_id)
 

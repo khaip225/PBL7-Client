@@ -211,11 +211,45 @@ class PipelineEngine:
 
         if audio_db_path and os.path.exists(audio_db_path):
             self.audio_database = np.load(audio_db_path, allow_pickle=True).item()
+            self.audio_database["files"] = self._normalize_db_paths(
+                self.audio_database.get("files", []), audio_db_path)
             print(f"[PipelineEngine] Audio DB: {len(self.audio_database['embeddings'])} files")
 
         if image_db_path and os.path.exists(image_db_path):
             self.image_database = np.load(image_db_path, allow_pickle=True).item()
+            self.image_database["files"] = self._normalize_db_paths(
+                self.image_database.get("files", []), image_db_path)
             print(f"[PipelineEngine] Image DB: {len(self.image_database['embeddings'])} files")
+
+    @staticmethod
+    def _normalize_db_paths(files: list[str], db_path: str) -> list[str]:
+        """Chuyển đường dẫn tuyệt đối cũ thành đường dẫn tồn tại trên máy hiện tại.
+
+        Nếu file path không tồn tại, thử resolve relative từ thư mục chứa database.
+        """
+        db_dir = os.path.dirname(os.path.abspath(db_path))
+        fixed = []
+        for fp in files:
+            if os.path.exists(fp):
+                fixed.append(fp)
+                continue
+            # Thử tìm bằng tên file trong thư mục database và thư mục cha
+            basename = os.path.basename(fp)
+            candidates = [
+                os.path.join(db_dir, "..", basename),        # ../tên_file
+                os.path.join(db_dir, "..", "image_files", basename),
+                os.path.join(db_dir, "..", "audio_files", basename),
+            ]
+            found = False
+            for cand in candidates:
+                cand_real = os.path.normpath(cand)
+                if os.path.exists(cand_real):
+                    fixed.append(cand_real)
+                    found = True
+                    break
+            if not found:
+                fixed.append(fp)  # giữ nguyên để không crash
+        return fixed
 
     # ═══════════════════════════════════════════════════════════════════
     # Preprocessing
